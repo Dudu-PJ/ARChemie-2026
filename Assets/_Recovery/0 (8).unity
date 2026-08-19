@@ -161,9 +161,10 @@ MonoBehaviour:
   - etano
   - eteno
   prefabsMoleculas:
-  - {fileID: 919132149155446097, guid: d8dd8297c752d334987f3ac524650965, type: 3}
+  - {fileID: 919132149155446097, guid: 1ee3b9dfe09029d4c8c0e1a876f67efb, type: 3}
   - {fileID: 919132149155446097, guid: 31cd70280264d4542bc1d9be6028fb46, type: 3}
   - {fileID: 919132149155446097, guid: d6569475703dee045a4737f8fbea8be9, type: 3}
+  intervaloDeteccao: 1
 --- !u!4 &181184566
 Transform:
   m_ObjectHideFlags: 0
