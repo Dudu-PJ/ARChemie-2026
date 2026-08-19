@@ -14,7 +14,7 @@ public struct AtomDetection
     public float confianca;
 }
 
-public class DoZero : MonoBehaviour
+public class Detector : MonoBehaviour
 {
     // YOLO e Sentis
     public ModelAsset modeloYoloAsset;
@@ -26,8 +26,9 @@ public class DoZero : MonoBehaviour
     public ARAnchorManager arAnchorManager;
     public ARPlaneManager arPlaneManager;
     public Camera arCamera;
+    private ARRaycastManager raycastManager; // cacheado uma vez no Start, em vez de FindObjectOfType a cada instância
 
-    // Toque duplo
+    // Toque duplo (mantido caso queira voltar a exigir toque para instanciar)
     float ultimoToqueTempo = 0;
     float duploToqueMaxTempo = 0.3f;
 
@@ -48,46 +49,66 @@ public class DoZero : MonoBehaviour
     private bool vddMolecula = false;
     private List<AtomDetection> ultimasDeteccoes = new List<AtomDetection>();
     private string ultimaMoleculaDetectada;
+    private string moleculaInstanciadaAtual;
+
+    public float intervaloDeteccao = 1f;
+    private float tempoDesdeUltimaDeteccao = 0f;
 
     // Lista de moléculas orgâncias
     private static readonly Dictionary<(int C, int H, int O), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
-        { (1, 4, 0), "Metano" },
-        { (2, 6, 0), "Etano" },
-        { (2, 4, 0), "Eteno" },
-        { (1, 4, 1), "Metanol" },
-        { (2, 6, 1), "Etanol" },
-        { (1, 2, 2), "AcidoFormico" },
-        { (2, 4, 2), "AcidoAcetico" },
-        { (3, 6, 1), "Propanona" },
-        { (1, 2, 1), "Metanal" },
-        { (4, 10, 1), "EterDietilico" },
-        { (3, 6, 2), "MetanoatoDeEtila" },
-        { (2, 4, 1), "Etenol" },
+        { (1, 4, 0), "metano" },
+        { (2, 6, 0), "etano" },
+        { (2, 4, 0), "eteno" },
+        { (1, 4, 1), "metanol" },
+        { (2, 6, 1), "etanol" },
+        { (1, 2, 2), "acidoformico" },
+        { (2, 4, 2), "acidoacetico" },
+        { (3, 6, 1), "propanona" },
+        { (1, 2, 1), "metanal" },
+        { (4, 10, 1), "eterdietilico" },
+        { (3, 6, 2), "metanoatodeetila" },
+        { (2, 4, 1), "eteno" },
         };
 
     void Start()
     {
-        //
         prefabDict = new Dictionary<string, GameObject>();
         foreach (var prefab in prefabsMoleculas)
             prefabDict[prefab.name] = prefab;
-        //
 
         modelo = ModelLoader.Load(modeloYoloAsset);
         worker = new Worker(modelo, BackendType.GPUCompute);
 
         nomes = new string[] { "carbono", "hidrogenio" };
 
+        raycastManager = FindObjectOfType<ARRaycastManager>();
+        if (raycastManager == null)
+            Debug.LogWarning("ARRaycastManager não encontrado na cena.");
+
         Debug.Log("Modelo carregado");
     }
 
     void Update()
     {
-        CapturaFrame();
-        if(vddMolecula)
+        tempoDesdeUltimaDeteccao += Time.deltaTime;
+        if (tempoDesdeUltimaDeteccao >= intervaloDeteccao)
+        {
+            tempoDesdeUltimaDeteccao = 0f;
+            CapturaFrame();
+        }
+
+        // Só instancia quando a molécula detectada MUDA (ou aparece pela primeira vez),
+        // em vez de destruir/recriar o objeto a cada frame enquanto vddMolecula for true.
+        if (vddMolecula && ultimaMoleculaDetectada != moleculaInstanciadaAtual)
         {
             InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
+            moleculaInstanciadaAtual = ultimaMoleculaDetectada;
         }
+        else if (!vddMolecula)
+        {
+            moleculaInstanciadaAtual = null;
+        }
+
         /*
         if (vddMolecula && Input.touchCount == 1)
         {
@@ -99,6 +120,7 @@ public class DoZero : MonoBehaviour
                     Debug.Log("Toque duplo detectado");
                     ultimoToqueTempo = 0;
                     InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
+                    moleculaInstanciadaAtual = ultimaMoleculaDetectada;
                 }
                 else
                 {
@@ -112,9 +134,7 @@ public class DoZero : MonoBehaviour
     private void CapturaFrame()
     {
         if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
-
         RodaInferencia(cpuImage);
-
     }
 
     private void RodaInferencia(XRCpuImage cpuImage)
@@ -126,10 +146,14 @@ public class DoZero : MonoBehaviour
         Destroy(inputTex);
 
         worker.Schedule(inputTensor);
-        Debug.Log("Schedule OK");
 
         using Tensor<float> outputTensor = worker.PeekOutput() as Tensor<float>;
-        Debug.Log($"Shape do Tensor: {outputTensor.shape}");
+        if (outputTensor == null)
+        {
+            Debug.LogWarning("Saída do worker não é um Tensor<float> válido.");
+            vddMolecula = false;
+            return;
+        }
 
         using Tensor<float> cpuOutput = outputTensor.ReadbackAndClone();
 
@@ -143,32 +167,45 @@ public class DoZero : MonoBehaviour
         if (molecula != null)
         {
             Handheld.Vibrate();
-            Debug.Log("Molecula detectada");
+            Debug.Log($"Molécula detectada: {molecula}");
             vddMolecula = true;
         }
         else
         {
-            Debug.Log("Nenhuma molécula detectada");
             vddMolecula = false;
         }
     }
 
     private Texture2D ConverteFrame(XRCpuImage cpuImage)
     {
+        // Converte no tamanho NATIVO da imagem
         var conversionParams = new XRCpuImage.ConversionParams
         {
             inputRect = new RectInt(0, 0, cpuImage.width, cpuImage.height),
-            outputDimensions = new Vector2Int(dimensao, dimensao),
+            outputDimensions = new Vector2Int(cpuImage.width, cpuImage.height),
             outputFormat = TextureFormat.RGBA32,
             transformation = XRCpuImage.Transformation.MirrorY
         };
 
-        var tex = new Texture2D(dimensao, dimensao, TextureFormat.RGBA32, false);
-        cpuImage.Convert(conversionParams, tex.GetRawTextureData<byte>());
-        tex.Apply();
+        var texNativa = new Texture2D(cpuImage.width, cpuImage.height, TextureFormat.RGBA32, false);
+        cpuImage.Convert(conversionParams, texNativa.GetRawTextureData<byte>());
+        texNativa.Apply();
 
-        Debug.Log("Frame convertido para textura");
-        return tex;
+        // Redimensiona pra 416x416 via GPU
+        var rt = RenderTexture.GetTemporary(dimensao, dimensao, 0, RenderTextureFormat.ARGB32);
+        Graphics.Blit(texNativa, rt);
+        Destroy(texNativa);
+
+        var texFinal = new Texture2D(dimensao, dimensao, TextureFormat.RGBA32, false);
+        var rtAtivaAnterior = RenderTexture.active;
+        RenderTexture.active = rt;
+        texFinal.ReadPixels(new Rect(0, 0, dimensao, dimensao), 0, 0);
+        texFinal.Apply();
+        RenderTexture.active = rtAtivaAnterior;
+
+        RenderTexture.ReleaseTemporary(rt);
+
+        return texFinal;
     }
 
     private Tensor<float> TexturaPraTensor(Texture2D tex)
@@ -181,20 +218,19 @@ public class DoZero : MonoBehaviour
         {
             for (int x = 0; x < dimensao; x++)
             {
-                int srcIdx = y * dimensao + x;
-                int dstBase = y * dimensao + x;
+                int idx = y * dimensao + x;
 
-                data[0 * total + dstBase] = pixels[srcIdx].r / 255f;
-                data[1 * total + dstBase] = pixels[srcIdx].g / 255f;
-                data[2 * total + dstBase] = pixels[srcIdx].b / 255f;
+                data[0 * total + idx] = pixels[idx].r / 255f;
+                data[1 * total + idx] = pixels[idx].g / 255f;
+                data[2 * total + idx] = pixels[idx].b / 255f;
             }
         }
-
-        Debug.Log("Textura convertida pra Tensor");
 
         return new Tensor<float>(new TensorShape(1, 3, dimensao, dimensao), data);
     }
 
+    // Decodifica a saída do YOLO (formato [1, 4+numClasses, numAnchors]) em detecções:
+    // extrai caixa + melhor classe por âncora, filtra por confiancaMin e aplica NMS por classe.
     private List<AtomDetection> DecodeYoloOutput(Tensor<float> output)
     {
         var deteccoes = new List<AtomDetection>();
@@ -202,6 +238,37 @@ public class DoZero : MonoBehaviour
         int numAnchors = output.shape[2];
 
         var raw = new List<(Rect rect, int classIdx, float conf)>();
+
+        for (int a = 0; a < numAnchors; a++)
+        {
+            float cx = output[0, 0, a];
+            float cy = output[0, 1, a];
+            float w = output[0, 2, a];
+            float h = output[0, 3, a];
+
+            int melhorClasse = -1;
+            float melhorConf = 0f;
+            for (int c = 0; c < numClasses; c++)
+            {
+                float score = output[0, 4 + c, a];
+                if (score > melhorConf)
+                {
+                    melhorConf = score;
+                    melhorClasse = c;
+                }
+            }
+
+            if (melhorClasse < 0 || melhorConf < confiancaMin) continue;
+            if (melhorClasse >= nomes.Length) continue; // classe sem nome mapeado em `nomes`
+
+            // Converte de coordenadas de pixel (espaço 'dimensao') para normalizadas (0-1)
+            float xMin = (cx - w / 2f) / dimensao;
+            float yMin = (cy - h / 2f) / dimensao;
+            float largura = w / dimensao;
+            float altura = h / dimensao;
+
+            raw.Add((new Rect(xMin, yMin, largura, altura), melhorClasse, melhorConf));
+        }
 
         foreach (var group in raw.GroupBy(r => r.classIdx))
         {
@@ -264,9 +331,21 @@ public class DoZero : MonoBehaviour
 
     private void InstanciaMolecula(List<AtomDetection> deteccoes, string nomeMolecula)
     {
+        if (deteccoes == null || deteccoes.Count == 0)
+        {
+            Debug.LogWarning("Nenhuma detecção disponível para posicionar a molécula.");
+            return;
+        }
+
         if (!prefabDict.TryGetValue(nomeMolecula, out GameObject prefab))
         {
             Debug.LogWarning($"Prefab não encontrado: {nomeMolecula}");
+            return;
+        }
+
+        if (raycastManager == null)
+        {
+            Debug.LogWarning("ARRaycastManager não encontrado");
             return;
         }
 
@@ -279,23 +358,13 @@ public class DoZero : MonoBehaviour
             );
         centroTela /= deteccoes.Count;
 
-        // Raycast AR
         var hits = new List<ARRaycastHit>();
-        if (!arCamera.GetComponent<ARRaycastManager>() &&
-            !FindObjectOfType<ARRaycastManager>())
-        {
-            Debug.LogWarning("ARRaycastManager não encontrado");
-            return;
-        }
-
-        var raycastManager = FindObjectOfType<ARRaycastManager>();
         if (!raycastManager.Raycast(centroTela, hits, TrackableType.PlaneWithinPolygon))
         {
             Debug.Log("Raycast não acertou nenhum plano");
             return;
         }
 
-        // Destrói molécula anterior e instancia nova
         if (moleculaAtual != null)
             Destroy(moleculaAtual);
 
