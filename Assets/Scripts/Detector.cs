@@ -26,9 +26,9 @@ public class Detector : MonoBehaviour
     public ARAnchorManager arAnchorManager;
     public ARPlaneManager arPlaneManager;
     public Camera arCamera;
-    private ARRaycastManager raycastManager; // cacheado uma vez no Start, em vez de FindObjectOfType a cada instância
+    private ARRaycastManager raycastManager;
 
-    // Toque duplo (mantido caso queira voltar a exigir toque para instanciar)
+    // Toque duplo
     float ultimoToqueTempo = 0;
     float duploToqueMaxTempo = 0.3f;
 
@@ -54,6 +54,8 @@ public class Detector : MonoBehaviour
     public float intervaloDeteccao = 1f;
     private float tempoDesdeUltimaDeteccao = 0f;
 
+    private bool processando = false;
+
     // Lista de moléculas orgâncias
     private static readonly Dictionary<(int C, int H, int O), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
         { (1, 4, 0), "metano" },
@@ -77,11 +79,13 @@ public class Detector : MonoBehaviour
             prefabDict[prefab.name] = prefab;
 
         modelo = ModelLoader.Load(modeloYoloAsset);
-        worker = new Worker(modelo, BackendType.GPUCompute);
+        var backend = SystemInfo.supportsComputeShaders ? BackendType.GPUCompute : BackendType.CPU;
+        worker = new Worker(modelo, backend);
+        Debug.Log($"Backend de inferência: {backend}");
 
         nomes = new string[] { "carbono", "hidrogenio" };
 
-        raycastManager = FindObjectOfType<ARRaycastManager>();
+        raycastManager = FindAnyObjectByType<ARRaycastManager>();
         if (raycastManager == null)
             Debug.LogWarning("ARRaycastManager não encontrado na cena.");
 
@@ -91,14 +95,12 @@ public class Detector : MonoBehaviour
     void Update()
     {
         tempoDesdeUltimaDeteccao += Time.deltaTime;
-        if (tempoDesdeUltimaDeteccao >= intervaloDeteccao)
+        if (tempoDesdeUltimaDeteccao >= intervaloDeteccao && !processando)
         {
             tempoDesdeUltimaDeteccao = 0f;
             CapturaFrame();
         }
 
-        // Só instancia quando a molécula detectada MUDA (ou aparece pela primeira vez),
-        // em vez de destruir/recriar o objeto a cada frame enquanto vddMolecula for true.
         if (vddMolecula && ultimaMoleculaDetectada != moleculaInstanciadaAtual)
         {
             InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
@@ -134,45 +136,55 @@ public class Detector : MonoBehaviour
     private void CapturaFrame()
     {
         if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
-        RodaInferencia(cpuImage);
+        processando = true;
+        RodaInferenciaAsync(cpuImage);
     }
 
-    private void RodaInferencia(XRCpuImage cpuImage)
+    private async void RodaInferenciaAsync(XRCpuImage cpuImage)
     {
-        Texture2D inputTex = ConverteFrame(cpuImage);
-        cpuImage.Dispose();
-
-        using Tensor<float> inputTensor = TexturaPraTensor(inputTex);
-        Destroy(inputTex);
-
-        worker.Schedule(inputTensor);
-
-        using Tensor<float> outputTensor = worker.PeekOutput() as Tensor<float>;
-        if (outputTensor == null)
+        try
         {
-            Debug.LogWarning("Saída do worker não é um Tensor<float> válido.");
-            vddMolecula = false;
-            return;
+            Texture2D inputTex = ConverteFrame(cpuImage);
+            cpuImage.Dispose();
+
+            using Tensor<float> inputTensor = TexturaPraTensor(inputTex);
+            Destroy(inputTex);
+
+            worker.Schedule(inputTensor);
+
+            var outputTensor = worker.PeekOutput() as Tensor<float>;
+            if (outputTensor == null)
+            {
+                Debug.LogWarning("Saída do worker não é um Tensor<float> válido.");
+                vddMolecula = false;
+                return;
+            }
+
+            using Tensor<float> cpuOutput = await outputTensor.ReadbackAndCloneAsync();
+
+            List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
+            string molecula = IdentificaMolecula(deteccoes);
+            ultimasDeteccoes = deteccoes;
+            ultimaMoleculaDetectada = molecula;
+
+            if (molecula != null)
+            {
+                Handheld.Vibrate();
+                vddMolecula = true;
+            }
+            else
+            {
+                vddMolecula = false;
+            }
         }
-
-        using Tensor<float> cpuOutput = outputTensor.ReadbackAndClone();
-
-        List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
-        Debug.Log($"Total de detecções: {deteccoes.Count}");
-
-        string molecula = IdentificaMolecula(deteccoes);
-        ultimasDeteccoes = deteccoes;
-        ultimaMoleculaDetectada = molecula;
-
-        if (molecula != null)
+        catch (System.Exception e)
         {
-            Handheld.Vibrate();
-            Debug.Log($"Molécula detectada: {molecula}");
-            vddMolecula = true;
-        }
-        else
-        {
+            Debug.LogError($"Erro na inferência: {e}");
             vddMolecula = false;
+        }
+        finally
+        {
+            processando = false;
         }
     }
 
