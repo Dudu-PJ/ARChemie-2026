@@ -5,6 +5,7 @@ using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.InferenceEngine;
 using System.Linq;
+using TMPro;
 
 //Info de elemento
 public struct AtomDetection
@@ -51,16 +52,19 @@ public class Detector : MonoBehaviour
     private string ultimaMoleculaDetectada;
     private string moleculaInstanciadaAtual;
 
+    // Deteccao
     public float intervaloDeteccao = 1f;
-    private float tempoDesdeUltimaDeteccao = 0f;
-
+    private float tempoUltimaDeteccaoConcluida = -999f;
     private bool processando = false;
+
+    // UI
+    public TMPro.TextMeshProUGUI textoDeteccao;
 
     // Lista de moléculas orgâncias
     private static readonly Dictionary<(int C, int H, int O), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
         { (1, 4, 0), "metano" },
         { (2, 6, 0), "etano" },
-        { (2, 4, 0), "eteno" },
+        { (2, 4, 0), "eteno" }};/*
         { (1, 4, 1), "metanol" },
         { (2, 6, 1), "etanol" },
         { (1, 2, 2), "acidoformico" },
@@ -69,8 +73,7 @@ public class Detector : MonoBehaviour
         { (1, 2, 1), "metanal" },
         { (4, 10, 1), "eterdietilico" },
         { (3, 6, 2), "metanoatodeetila" },
-        { (2, 4, 1), "eteno" },
-        };
+        };*/
 
     void Start()
     {
@@ -94,43 +97,43 @@ public class Detector : MonoBehaviour
 
     void Update()
     {
-        tempoDesdeUltimaDeteccao += Time.deltaTime;
-        if (tempoDesdeUltimaDeteccao >= intervaloDeteccao && !processando)
+        bool toqueDuplo = DetectaToqueDuplo();
+        bool nCooldown = Time.time - tempoUltimaDeteccaoConcluida >= intervaloDeteccao;
+
+        if (toqueDuplo && !processando && nCooldown)
         {
-            tempoDesdeUltimaDeteccao = 0f;
             CapturaFrame();
         }
 
         if (vddMolecula && ultimaMoleculaDetectada != moleculaInstanciadaAtual)
         {
-            InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
             moleculaInstanciadaAtual = ultimaMoleculaDetectada;
+            InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
         }
-        else if (!vddMolecula)
-        {
-            moleculaInstanciadaAtual = null;
-        }
+    }
 
-        /*
-        if (vddMolecula && Input.touchCount == 1)
+    private bool DetectaToqueDuplo()
+    {
+        bool toqueIniciado = false;
+
+        if (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
         {
-            Touch toque = Input.GetTouch(0);
-            if (toque.phase == TouchPhase.Began)
-            {
-                if (Time.time - ultimoToqueTempo <= duploToqueMaxTempo)
-                {
-                    Debug.Log("Toque duplo detectado");
-                    ultimoToqueTempo = 0;
-                    InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
-                    moleculaInstanciadaAtual = ultimaMoleculaDetectada;
-                }
-                else
-                {
-                    ultimoToqueTempo = Time.time;
-                }
-            }
+            toqueIniciado = true;
         }
-        */
+#if UNITY_EDITOR
+        else if (Input.GetMouseButtonDown(0))
+        {
+            toqueIniciado = true;
+        }
+#endif
+
+        if (!toqueIniciado)
+            return false;
+
+        float agora = Time.time;
+        bool duplo = (agora - ultimoToqueTempo) <= duploToqueMaxTempo;
+        ultimoToqueTempo = duplo ? -999f : agora; // evita que um triplo toque conte como dois duplos seguidos
+        return duplo;
     }
 
     private void CapturaFrame()
@@ -171,10 +174,14 @@ public class Detector : MonoBehaviour
             {
                 Handheld.Vibrate();
                 vddMolecula = true;
+                if (textoDeteccao != null)
+                    textoDeteccao.text = $"Molécula detectada: {molecula}";
             }
             else
             {
                 vddMolecula = false;
+                if (textoDeteccao != null)
+                    textoDeteccao.text = "Nenhuma molécula detectada";
             }
         }
         catch (System.Exception e)
@@ -241,8 +248,6 @@ public class Detector : MonoBehaviour
         return new Tensor<float>(new TensorShape(1, 3, dimensao, dimensao), data);
     }
 
-    // Decodifica a saída do YOLO (formato [1, 4+numClasses, numAnchors]) em detecções:
-    // extrai caixa + melhor classe por âncora, filtra por confiancaMin e aplica NMS por classe.
     private List<AtomDetection> DecodeYoloOutput(Tensor<float> output)
     {
         var deteccoes = new List<AtomDetection>();
@@ -271,9 +276,8 @@ public class Detector : MonoBehaviour
             }
 
             if (melhorClasse < 0 || melhorConf < confiancaMin) continue;
-            if (melhorClasse >= nomes.Length) continue; // classe sem nome mapeado em `nomes`
+            if (melhorClasse >= nomes.Length) continue;
 
-            // Converte de coordenadas de pixel (espaço 'dimensao') para normalizadas (0-1)
             float xMin = (cx - w / 2f) / dimensao;
             float yMin = (cy - h / 2f) / dimensao;
             float largura = w / dimensao;
@@ -361,7 +365,6 @@ public class Detector : MonoBehaviour
             return;
         }
 
-        // Centro médio dos bounding boxes
         Vector2 centroTela = Vector2.zero;
         foreach (var det in deteccoes)
             centroTela += new Vector2(
