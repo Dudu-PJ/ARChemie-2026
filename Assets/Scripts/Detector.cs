@@ -61,19 +61,10 @@ public class Detector : MonoBehaviour
     public TMPro.TextMeshProUGUI textoDeteccao;
 
     // Lista de moléculas orgâncias
-    private static readonly Dictionary<(int C, int H, int O), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
+    private static readonly Dictionary<(int C, int H, int L), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
         { (1, 4, 0), "metano" },
-        { (2, 6, 0), "etano" },
-        { (2, 4, 0), "eteno" }};/*
-        { (1, 4, 1), "metanol" },
-        { (2, 6, 1), "etanol" },
-        { (1, 2, 2), "acidoformico" },
-        { (2, 4, 2), "acidoacetico" },
-        { (3, 6, 1), "propanona" },
-        { (1, 2, 1), "metanal" },
-        { (4, 10, 1), "eterdietilico" },
-        { (3, 6, 2), "metanoatodeetila" },
-        };*/
+        { (2, 4, 0), "eteno" },
+        { (2, 6, 0), "etano" }};
 
     void Start()
     {
@@ -120,12 +111,12 @@ public class Detector : MonoBehaviour
         {
             toqueIniciado = true;
         }
-#if UNITY_EDITOR
+        #if UNITY_EDITOR
         else if (Input.GetMouseButtonDown(0))
         {
             toqueIniciado = true;
         }
-#endif
+        #endif
 
         if (!toqueIniciado)
             return false;
@@ -328,17 +319,17 @@ public class Detector : MonoBehaviour
 
     private string IdentificaMolecula(List<AtomDetection> deteccoes)
     {
-        int C = 0, H = 0, O = 0;
+        int C = 0, H = 0, L = 0;
         foreach (var det in deteccoes)
         {
             if (det.elemento == "carbono") C++;
             else if (det.elemento == "hidrogenio") H++;
-            else if (det.elemento == "oxigenio") O++;
+            else if (det.elemento == "ligacao") L++;
         }
 
-        Debug.Log($"Átomos detectados: C={C} H={H} O={O}");
+        Debug.Log($"Elementos detectados: C={C} H={H} L={L}");
 
-        var chave = (C, H, O);
+        var chave = (C, H, L);
         if (tabelaMoleculas.TryGetValue(chave, out string nome))
             return nome;
 
