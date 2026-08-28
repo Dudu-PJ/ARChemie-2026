@@ -9,7 +9,8 @@
 /[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
-/[Bb]Build/
+/[Bb]uild/
+/[Bb]Builds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
 *.log

@@ -64,7 +64,7 @@ public class Detector : MonoBehaviour
     private static readonly Dictionary<(int C, int H, int L), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
         { (1, 4, 0), "metano" },
         { (2, 4, 0), "eteno" },
-        { (2, 6, 0), "etano" }};
+        { (2, 6, 0), "etano" }}; //O reconhecimento de ligação está deficiente, então vou fingir que não existe por agora
 
     void Start()
     {
