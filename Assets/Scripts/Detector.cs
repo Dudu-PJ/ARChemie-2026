@@ -1,10 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.InferenceEngine;
-using System.Linq;
 using TMPro;
 
 //Info de elemento
@@ -40,17 +41,12 @@ public class Detector : MonoBehaviour
     public int dimensao = 416;
     public float confiancaMin = 0.5f;
     public float iouMin = 0.45f;
-    public string[] nomes;
+    private string[] nomes;
 
     // Modelo 3D
     public GameObject[] prefabsMoleculas;
     private Dictionary<string, GameObject> prefabDict;
     private GameObject moleculaAtual;
-
-    private bool vddMolecula = false;
-    private List<AtomDetection> ultimasDeteccoes = new List<AtomDetection>();
-    private string ultimaMoleculaDetectada;
-    private string moleculaInstanciadaAtual;
 
     // Deteccao
     public float intervaloDeteccao = 1f;
@@ -61,10 +57,10 @@ public class Detector : MonoBehaviour
     public TMPro.TextMeshProUGUI textoDeteccao;
 
     // Lista de moléculas orgâncias
-    private static readonly Dictionary<(int C, int H, int L), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
-        { (1, 4, 0), "metano" },
-        { (2, 4, 0), "eteno" },
-        { (2, 6, 0), "etano" }}; //O reconhecimento de ligação está deficiente, então vou fingir que não existe por agora
+    private static readonly Dictionary<(int C, int H), string> tabelaMoleculas = new Dictionary<(int, int), string> {
+        { (1, 4), "metano" },
+        { (2, 4), "eteno" },
+        { (2, 6), "etano" }}; //Teria ligação, mas o reconhecimento de ligação está deficiente, então vou fingir que não existe por agora
 
     void Start()
     {
@@ -81,9 +77,24 @@ public class Detector : MonoBehaviour
 
         raycastManager = FindAnyObjectByType<ARRaycastManager>();
         if (raycastManager == null)
-            Debug.LogWarning("ARRaycastManager não encontrado na cena.");
+            Debug.LogWarning("ARRaycastManager não encontrado na cena");
+
+            _ = AquecerModelo();
 
         Debug.Log("Modelo carregado");
+    }
+
+    private async Task AquecerModelo()
+    {
+        using var dummy = new Tensor<float>(new TensorShape(1, 3, dimensao, dimensao));
+        worker.Schedule(dummy);
+        var saida = worker.PeekOutput() as Tensor<float>;
+        if (saida != null)
+        {
+            using var _ = await saida.ReadbackAndCloneAsync();
+        }
+            
+        Debug.Log("Aquecimento do modelo concluído");
     }
 
     void Update()
@@ -93,13 +104,9 @@ public class Detector : MonoBehaviour
 
         if (toqueDuplo && !processando && nCooldown)
         {
-            CapturaFrame();
-        }
-
-        if (vddMolecula && ultimaMoleculaDetectada != moleculaInstanciadaAtual)
-        {
-            moleculaInstanciadaAtual = ultimaMoleculaDetectada;
-            InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
+            if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
+            processando = true;
+            RodaInferencia(cpuImage);
         }
     }
 
@@ -111,30 +118,24 @@ public class Detector : MonoBehaviour
         {
             toqueIniciado = true;
         }
-        #if UNITY_EDITOR
+
+#if UNITY_EDITOR
         else if (Input.GetMouseButtonDown(0))
         {
             toqueIniciado = true;
         }
-        #endif
+#endif
 
         if (!toqueIniciado)
             return false;
 
         float agora = Time.time;
         bool duplo = (agora - ultimoToqueTempo) <= duploToqueMaxTempo;
-        ultimoToqueTempo = duplo ? -999f : agora; // evita que um triplo toque conte como dois duplos seguidos
+        ultimoToqueTempo = duplo ? -999f : agora;
         return duplo;
     }
 
-    private void CapturaFrame()
-    {
-        if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
-        processando = true;
-        RodaInferenciaAsync(cpuImage);
-    }
-
-    private async void RodaInferenciaAsync(XRCpuImage cpuImage)
+    private async void RodaInferencia(XRCpuImage cpuImage)
     {
         try
         {
@@ -144,33 +145,32 @@ public class Detector : MonoBehaviour
             using Tensor<float> inputTensor = TexturaPraTensor(inputTex);
             Destroy(inputTex);
 
+            Debug.Log(Time.frameCount);
+
             worker.Schedule(inputTensor);
 
             var outputTensor = worker.PeekOutput() as Tensor<float>;
             if (outputTensor == null)
             {
-                Debug.LogWarning("Saída do worker não é um Tensor<float> válido.");
-                vddMolecula = false;
+                Debug.LogWarning("Saída do worker não é um Tensor<float> válido!");
                 return;
             }
 
             using Tensor<float> cpuOutput = await outputTensor.ReadbackAndCloneAsync();
+            Debug.Log(Time.frameCount);
 
             List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
             string molecula = IdentificaMolecula(deteccoes);
-            ultimasDeteccoes = deteccoes;
-            ultimaMoleculaDetectada = molecula;
 
             if (molecula != null)
             {
                 Handheld.Vibrate();
-                vddMolecula = true;
+                InstanciaMolecula(deteccoes, molecula);
                 if (textoDeteccao != null)
                     textoDeteccao.text = $"Molécula detectada: {molecula}";
             }
             else
             {
-                vddMolecula = false;
                 if (textoDeteccao != null)
                     textoDeteccao.text = "Nenhuma molécula detectada";
             }
@@ -178,17 +178,16 @@ public class Detector : MonoBehaviour
         catch (System.Exception e)
         {
             Debug.LogError($"Erro na inferência: {e}");
-            vddMolecula = false;
         }
         finally
         {
             processando = false;
+            tempoUltimaDeteccaoConcluida = Time.time;
         }
     }
 
     private Texture2D ConverteFrame(XRCpuImage cpuImage)
     {
-        // Converte no tamanho NATIVO da imagem
         var conversionParams = new XRCpuImage.ConversionParams
         {
             inputRect = new RectInt(0, 0, cpuImage.width, cpuImage.height),
@@ -201,7 +200,6 @@ public class Detector : MonoBehaviour
         cpuImage.Convert(conversionParams, texNativa.GetRawTextureData<byte>());
         texNativa.Apply();
 
-        // Redimensiona pra 416x416 via GPU
         var rt = RenderTexture.GetTemporary(dimensao, dimensao, 0, RenderTextureFormat.ARGB32);
         Graphics.Blit(texNativa, rt);
         Destroy(texNativa);
@@ -319,17 +317,16 @@ public class Detector : MonoBehaviour
 
     private string IdentificaMolecula(List<AtomDetection> deteccoes)
     {
-        int C = 0, H = 0, L = 0;
+        int C = 0, H = 0;
         foreach (var det in deteccoes)
         {
             if (det.elemento == "carbono") C++;
             else if (det.elemento == "hidrogenio") H++;
-            else if (det.elemento == "ligacao") L++;
         }
 
-        Debug.Log($"Elementos detectados: C={C} H={H} L={L}");
+        Debug.Log($"Elementos detectados: C={C} H={H}");
 
-        var chave = (C, H, L);
+        var chave = (C, H);
         if (tabelaMoleculas.TryGetValue(chave, out string nome))
             return nome;
 
@@ -340,7 +337,7 @@ public class Detector : MonoBehaviour
     {
         if (deteccoes == null || deteccoes.Count == 0)
         {
-            Debug.LogWarning("Nenhuma detecção disponível para posicionar a molécula.");
+            Debug.LogWarning("Nenhuma detecção disponível para posicionar a molécula");
             return;
         }
 
