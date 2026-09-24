@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
@@ -13,7 +12,6 @@ public struct AtomDetection
 {
     public string elemento;
     public Rect screenRect;
-    public float confianca;
 }
 
 public class Detector : MonoBehaviour
@@ -27,15 +25,11 @@ public class Detector : MonoBehaviour
     public ARCameraManager arCameraManager;
     public ARAnchorManager arAnchorManager;
     public ARPlaneManager arPlaneManager;
-    public Camera arCamera;
     private ARRaycastManager raycastManager;
 
     // Toque duplo
-    float ultimoToqueTempo = 0;
-    float duploToqueMaxTempo = 0.3f;
-
-    // Frame
-    private Texture2D texFrame;
+    private float ultimoToqueTempo = -999f;
+    private float duploToqueMaxTempo = 0.3f;
 
     // Parâmetros
     public int dimensao = 416;
@@ -47,6 +41,7 @@ public class Detector : MonoBehaviour
     public GameObject[] prefabsMoleculas;
     private Dictionary<string, GameObject> prefabDict;
     private GameObject moleculaAtual;
+    private ARAnchor anchorAtual;
 
     // Deteccao
     public float intervaloDeteccao = 1f;
@@ -55,6 +50,14 @@ public class Detector : MonoBehaviour
 
     // UI
     public TMPro.TextMeshProUGUI textoDeteccao;
+
+    // Escala com Mov Pinça
+    private Vector3 escala;
+    private float distInicial;
+
+    // Rotação com Mov Giro
+    private bool tocouNaMolecula;
+    public float multRotacao = 0.1f;
 
     // Lista de moléculas orgâncias
     private static readonly Dictionary<(int C, int H), string> tabelaMoleculas = new Dictionary<(int, int), string> {
@@ -79,7 +82,7 @@ public class Detector : MonoBehaviour
         if (raycastManager == null)
             Debug.LogWarning("ARRaycastManager não encontrado na cena");
 
-            _ = AquecerModelo();
+        _ = AquecerModelo();
 
         Debug.Log("Modelo carregado");
     }
@@ -93,12 +96,18 @@ public class Detector : MonoBehaviour
         {
             using var _ = await saida.ReadbackAndCloneAsync();
         }
-            
+
         Debug.Log("Aquecimento do modelo concluído");
     }
 
     void Update()
     {
+        if (Input.touchCount > 0)
+        {
+            MovGiro();
+            MovPinca();
+        }
+
         bool toqueDuplo = DetectaToqueDuplo();
         bool nCooldown = Time.time - tempoUltimaDeteccaoConcluida >= intervaloDeteccao;
 
@@ -224,13 +233,15 @@ public class Detector : MonoBehaviour
 
         for (int y = 0; y < dimensao; y++)
         {
+            int pixelY = dimensao - 1 - y;
             for (int x = 0; x < dimensao; x++)
             {
-                int idx = y * dimensao + x;
+                int idxTensor = y * dimensao + x;
+                int idxPixel = pixelY * dimensao + x;
 
-                data[0 * total + idx] = pixels[idx].r / 255f;
-                data[1 * total + idx] = pixels[idx].g / 255f;
-                data[2 * total + idx] = pixels[idx].b / 255f;
+                data[0 + idxTensor] = pixels[idxPixel].r / 255f;
+                data[1 * total + idxTensor] = pixels[idxPixel].g / 255f;
+                data[2 * total + idxTensor] = pixels[idxPixel].b / 255f;
             }
         }
 
@@ -294,7 +305,6 @@ public class Detector : MonoBehaviour
                 {
                     elemento = nomes[det.classIdx],
                     screenRect = det.rect,
-                    confianca = det.conf
                 });
             }
         }
@@ -368,16 +378,77 @@ public class Detector : MonoBehaviour
             return;
         }
 
-        if (moleculaAtual != null)
-            Destroy(moleculaAtual);
-
         var hit = hits[0];
-        moleculaAtual = Instantiate(prefab, hit.pose.position, hit.pose.rotation);
+
+        if (moleculaAtual != null) Destroy(moleculaAtual);
+        if (anchorAtual != null) Destroy(anchorAtual.gameObject);
+
+        var plano = arPlaneManager.GetPlane(hit.trackableId);
+        if (plano == null)
+        {
+            Debug.LogWarning("Plano não encontrado pro hit");
+            return;
+        }
+
+        anchorAtual = arAnchorManager.AttachAnchor(plano, hit.pose);
+        if (anchorAtual == null)
+        {
+            Debug.LogWarning("Falha ao criar âncora");
+            return;
+        }
+
+        moleculaAtual = Instantiate(prefab, anchorAtual.transform);
+        moleculaAtual.transform.localPosition = Vector3.zero;
+        moleculaAtual.transform.localRotation = Quaternion.identity;
         Debug.Log($"Molécula instanciada: {nomeMolecula}");
+    }
+
+    void MovPinca()
+    {
+        if (Input.touchCount == 2 && moleculaAtual != null)
+        {
+            Touch toque0 = Input.GetTouch(0);
+            Touch toque1 = Input.GetTouch(1);
+
+            if (toque0.phase == TouchPhase.Began || toque1.phase == TouchPhase.Began)
+            {
+                distInicial = Vector2.Distance(toque0.position, toque1.position);
+                escala = moleculaAtual.transform.localScale;
+            }
+            else if (distInicial > 0.01f)
+            {
+                float distAtual = Vector2.Distance(toque0.position, toque1.position);
+                float fatorEscala = distAtual / distInicial;
+
+                fatorEscala = Mathf.Clamp(fatorEscala, 0.2f, 5f);
+
+                moleculaAtual.transform.localScale = escala * fatorEscala;
+            }
+        }
+    }
+    
+    void MovGiro()
+    {
+        if (Input.touchCount == 1 && moleculaAtual != null)
+        {
+            Touch toque = Input.GetTouch(0);
+
+            if (toque.phase == TouchPhase.Began)
+            {
+                tocouNaMolecula = Physics.Raycast(Camera.main.ScreenPointToRay(toque.position), out var hit)
+                                  && hit.transform.IsChildOf(moleculaAtual.transform);
+            }
+            else if (toque.phase == TouchPhase.Moved && tocouNaMolecula)
+            {
+                moleculaAtual.transform.Rotate(Vector3.up, -toque.deltaPosition.x * multRotacao, Space.World);
+                moleculaAtual.transform.Rotate(Camera.main.transform.right, toque.deltaPosition.y * multRotacao, Space.World);
+            }
+        }
     }
 
     void OnDestroy()
     {
         worker?.Dispose();
+        if (anchorAtual != null) Destroy(anchorAtual.gameObject);
     }
 }

@@ -152,20 +152,17 @@ MonoBehaviour:
   arCameraManager: {fileID: 961466874}
   arAnchorManager: {fileID: 2145971450}
   arPlaneManager: {fileID: 2145971449}
-  arCamera: {fileID: 961466869}
   dimensao: 416
   confiancaMin: 0.5
   iouMin: 0.45
-  nomes:
-  - metano
-  - etano
-  - eteno
   prefabsMoleculas:
   - {fileID: 919132149155446097, guid: d8dd8297c752d334987f3ac524650965, type: 3}
   - {fileID: 919132149155446097, guid: 31cd70280264d4542bc1d9be6028fb46, type: 3}
   - {fileID: 919132149155446097, guid: d6569475703dee045a4737f8fbea8be9, type: 3}
   intervaloDeteccao: 1
   textoDeteccao: {fileID: 417860830}
+  escala: {x: 0, y: 0, z: 0}
+  distInicial: 0
 --- !u!4 &145441299
 Transform:
   m_ObjectHideFlags: 0
@@ -292,9 +289,9 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 1918289427}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -357.29, y: 165.7}
+  m_AnchorMin: {x: 0, y: 1}
+  m_AnchorMax: {x: 0, y: 1}
+  m_AnchoredPosition: {x: 146.70999, y: -76.3}
   m_SizeDelta: {x: 200, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &417860830
