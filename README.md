@@ -9,8 +9,12 @@
 </h4>
 
 <br>
+<br>
 
-### Sobre o projeto
+---
+
+
+### 🧪 ·  Sobre o projeto
 
 
 
@@ -22,7 +26,7 @@ O aplicativo utiliza `Realidade Aumentada (RA)` e um modelo de `Inteligência Ar
 
 ---
 
-### Softwares & ferramentas
+### 🛠️ · Softwares & ferramentas
 
 ![Unity](https://img.shields.io/badge/Unity-222224?style=for-the-badge&logo=unity&logoColor=white)
 ![ARFoundation](https://img.shields.io/badge/ARFoundation-222224?style=for-the-badge&logo=unity&logoColor=white)
@@ -32,5 +36,22 @@ O aplicativo utiliza `Realidade Aumentada (RA)` e um modelo de `Inteligência Ar
 ![Avogadro](https://img.shields.io/badge/Avogadro-2B1B3D?style=for-the-badge&logo=avogadro&logoColor=white)
 ![OpenBabel](https://img.shields.io/badge/OpenBabel-412991?style=for-the-badge&logo=openbabel&logoColor=white)
 ![Blender](https://img.shields.io/badge/Blender-E87D0D?style=for-the-badge&logo=blender&logoColor=white)
+
+---
+
+### 🧬 · Modelos 3D
+
+Os modelos moleculares utilizados pelo ARChemie são desenvolvidos com **Avogadro**, **OpenBabel** e **Blender**, representando as estruturas
+identificadas pelo sistema e posteriormente visualizadas em Realidade Aumentada.
+
+<br>
+
+<p align="center">
+  <img src="./docs_README/metano.png" width="500">
+</p>
+
+<p align="center">
+  <sub> Modelo 3D da molécula de metano.</sub>
+</p>
 
 ---
