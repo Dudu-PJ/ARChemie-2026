@@ -51,6 +51,9 @@ public class Detector : MonoBehaviour
     // UI
     public TMPro.TextMeshProUGUI textoDeteccao;
 
+    // Áudio
+    public AudioDescription audioDescription;
+
     // Escala com Mov Pinça
     private Vector3 escala;
     private float distInicial;
@@ -400,6 +403,10 @@ public class Detector : MonoBehaviour
         moleculaAtual = Instantiate(prefab, anchorAtual.transform);
         moleculaAtual.transform.localPosition = Vector3.zero;
         moleculaAtual.transform.localRotation = Quaternion.identity;
+
+        if (audioDescription != null)
+    audioDescription.ReproduzirDescricao(nomeMolecula);
+
         Debug.Log($"Molécula instanciada: {nomeMolecula}");
     }
 
