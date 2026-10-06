@@ -6,6 +6,7 @@ using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.InferenceEngine;
 using TMPro;
+using Unity.VisualScripting;
 
 //Info de elemento
 public struct AtomDetection
@@ -53,6 +54,9 @@ public class Detector : MonoBehaviour
 
     // Áudio
     public AudioDescription audioDescription;
+
+    // Interface Visual
+    public DescriptionUI descriptionUI;
 
     // Escala com Mov Pinça
     private Vector3 escala;
@@ -408,7 +412,14 @@ public class Detector : MonoBehaviour
     audioDescription.ReproduzirDescricao(nomeMolecula);
 
         Debug.Log($"Molécula instanciada: {nomeMolecula}");
+        
+        if (descriptionUI != null && !string.IsNullOrEmpty(nomeMolecula))
+{
+    descriptionUI.MostrarDescricao(nomeMolecula);
+}
     }
+
+    
 
     void MovPinca()
     {
