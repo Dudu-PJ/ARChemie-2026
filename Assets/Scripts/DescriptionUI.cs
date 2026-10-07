@@ -37,10 +37,10 @@ public void MostrarDescricao(String molecula){
 
         break;
 
-        case "etanol":
-        nomeComposto.text = "ETANOL";
-        formulaComposto.text = "C<sub>2</sub>H<sub>5</sub>OH";
-        textoDescricao.text = "O etanol é um composto orgânico da função álcool, utilizado como biocombustível, solvente e antisséptico.";
+        case "eteno":
+        nomeComposto.text = "ETENO";
+        formulaComposto.text = "C<sub>2</sub>H<sub>4</sub>";
+        textoDescricao.text = "O eteno, também conhecido como etileno, é um hidrocarboneto gasoso utilizado na produção de plásticos, solventes e como hormônio vegetal.";
 
         break;
 
