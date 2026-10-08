@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Collections;
 using System.Threading.Tasks;
 using System.Linq;
 using UnityEngine;
@@ -32,7 +33,7 @@ public class Detector : MonoBehaviour
     private float ultimoToqueTempo = -999f;
     private float duploToqueMaxTempo = 0.3f;
 
-    // Parâmetros
+    // Parametros
     private int dimensao = 416;
     public float confiancaMin = 0.5f;
     public float iouMin = 0.45f;
@@ -54,18 +55,17 @@ public class Detector : MonoBehaviour
     // UI
     public DescriptionUI descriptionUI;
 
-    // Áudio
+    // Audio
     public AudioDescription audioDescription;
 
-    // Escala com Mov Pinça
-    private Vector3 escala;
-    private float distInicial;
+    // Movimentos por toque
+    public MovToques movToques;
 
-    // Rotação com Mov Giro
-    private bool tocouNaMolecula;
-    public float multRotacao = 0.1f;
 
-    // Lista de moléculas orgâncias
+    public DebugDeteccao debug;
+
+
+    // Lista de moleculas organicas
     private static readonly Dictionary<(int C, int H), string> tabelaMoleculas = new Dictionary<(int, int), string> {
         { (1, 4), "metano" },
         { (2, 4), "eteno" },
@@ -73,6 +73,8 @@ public class Detector : MonoBehaviour
 
     void Start()
     {
+        if (movToques == null) movToques = GetComponent<MovToques>();
+
         prefabDict = new Dictionary<string, GameObject>();
         foreach (var prefab in prefabsMoleculas)
             prefabDict[prefab.name] = prefab;
@@ -116,10 +118,10 @@ public class Detector : MonoBehaviour
 
     void Update()
     {
-        if (Input.touchCount > 0)
+        if (moleculaAtual != null)
         {
-            MovGiro();
-            MovPinca();
+            movToques.MovPinca(moleculaAtual);
+            movToques.MovGiro(moleculaAtual);
         }
 
         bool toqueDuplo = DetectaToqueDuplo();
@@ -135,6 +137,8 @@ public class Detector : MonoBehaviour
 
     private bool DetectaToqueDuplo()
     {
+        if (Input.touchCount > 1) return false;
+
         bool toqueIniciado = false;
 
         if (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
@@ -186,6 +190,10 @@ public class Detector : MonoBehaviour
             using Tensor<float> cpuOutput = await outputTensor.ReadbackAndCloneAsync();
 
             List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
+
+            if (debug != null)
+                debug.MostrarMarcadores(deteccoes.Select(d => QuadradoParaTela(d.screenRect.center)).ToList());
+
             string molecula = IdentificaMolecula(deteccoes);
 
             if (molecula != null)
@@ -219,16 +227,21 @@ public class Detector : MonoBehaviour
         int x0 = (cpuImage.width - lado) / 2;
         int y0 = (cpuImage.height - lado) / 2;
 
+        int saida = Mathf.Min(lado, dimensao);
+
         var conversionParams = new XRCpuImage.ConversionParams
         {
             inputRect = new RectInt(x0, y0, lado, lado),
-            outputDimensions = new Vector2Int(dimensao, dimensao),
+            outputDimensions = new Vector2Int(saida, saida),
             outputFormat = TextureFormat.RGBA32,
             transformation = XRCpuImage.Transformation.MirrorY
         };
 
-        if (texEntrada == null)
-            texEntrada = new Texture2D(dimensao, dimensao, TextureFormat.RGBA32, false);
+        if (texEntrada == null || texEntrada.width != saida)
+        {
+            if (texEntrada != null) Destroy(texEntrada);
+            texEntrada = new Texture2D(saida, saida, TextureFormat.RGBA32, false);
+        }
 
         cpuImage.Convert(conversionParams, texEntrada.GetRawTextureData<byte>());
         return texEntrada;
@@ -237,6 +250,7 @@ public class Detector : MonoBehaviour
     private Tensor<float> TexturaPraTensor(Texture2D tex)
     {
         Color32[] pixels = tex.GetPixels32();
+        int src = tex.width;
         int total = dimensao * dimensao;
         if (bufferTensor == null) bufferTensor = new float[3 * total];
 
@@ -245,7 +259,10 @@ public class Detector : MonoBehaviour
             for (int x = 0; x < dimensao; x++)
             {
                 int idxTensor = y * dimensao + x;
-                int idxPixel = x * dimensao + y;
+
+                int oy = (dimensao - 1 - y) * src / dimensao;
+                int ox = (dimensao - 1 - x) * src / dimensao;
+                int idxPixel = oy * src + ox;
 
                 bufferTensor[idxTensor] = pixels[idxPixel].r / 255f;
                 bufferTensor[total + idxTensor] = pixels[idxPixel].g / 255f;
@@ -307,7 +324,7 @@ public class Detector : MonoBehaviour
                 screenRect = best.rect,
             });
 
-            sorted.RemoveAll(r => IoU(r.rect, best.rect) > iouMin);
+            sorted.RemoveAll(r => r.classIdx == best.classIdx && IoU(r.rect, best.rect) > iouMin);
         }
 
         return deteccoes;
@@ -410,51 +427,6 @@ public class Detector : MonoBehaviour
         }
 
         return true;
-    }
-
-    void MovPinca()
-    {
-        if (Input.touchCount == 2 && moleculaAtual != null)
-        {
-            Touch toque0 = Input.GetTouch(0);
-            Touch toque1 = Input.GetTouch(1);
-
-            if (toque0.phase == TouchPhase.Began || toque1.phase == TouchPhase.Began)
-            {
-                distInicial = Vector2.Distance(toque0.position, toque1.position);
-                escala = moleculaAtual.transform.localScale;
-            }
-            else if (distInicial > 0.01f)
-            {
-                float distAtual = Vector2.Distance(toque0.position, toque1.position);
-                float fatorEscala = distAtual / distInicial;
-
-                fatorEscala = Mathf.Clamp(fatorEscala, 0.2f, 5f);
-
-                moleculaAtual.transform.localScale = escala * fatorEscala;
-            }
-        }
-    }
-
-    void MovGiro()
-    {
-        if (Input.touchCount != 1) tocouNaMolecula = false;
-
-        if (Input.touchCount == 1 && moleculaAtual != null)
-        {
-            Touch toque = Input.GetTouch(0);
-
-            if (toque.phase == TouchPhase.Began)
-            {
-                tocouNaMolecula = Physics.Raycast(Camera.main.ScreenPointToRay(toque.position), out var hit)
-                                  && hit.transform.IsChildOf(moleculaAtual.transform);
-            }
-            else if (toque.phase == TouchPhase.Moved && tocouNaMolecula)
-            {
-                moleculaAtual.transform.Rotate(Vector3.up, -toque.deltaPosition.x * multRotacao, Space.World);
-                moleculaAtual.transform.Rotate(Camera.main.transform.right, toque.deltaPosition.y * multRotacao, Space.World);
-            }
-        }
     }
 
     void OnDestroy()
