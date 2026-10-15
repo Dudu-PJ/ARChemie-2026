@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.InferenceEngine;
-using TMPro;
+using UnityEngine.EventSystems;
 
 //Info de elemento
 public struct AtomDetection
@@ -19,14 +19,12 @@ public class Detector : MonoBehaviour
 {
     // YOLO e Sentis
     public ModelAsset modeloYoloAsset;
-    private Model modelo;
     private Worker worker;
     private bool modeloPronto = false;
 
     // AR
     public ARCameraManager arCameraManager;
     public ARAnchorManager arAnchorManager;
-    public ARPlaneManager arPlaneManager;
     private ARRaycastManager raycastManager;
 
     // Toque duplo
@@ -61,10 +59,6 @@ public class Detector : MonoBehaviour
     // Movimentos por toque
     public MovToques movToques;
 
-
-    public DebugDeteccao debug;
-
-
     // Lista de moleculas organicas
     private static readonly Dictionary<(int C, int H), string> tabelaMoleculas = new Dictionary<(int, int), string> {
         { (1, 4), "metano" },
@@ -79,7 +73,7 @@ public class Detector : MonoBehaviour
         foreach (var prefab in prefabsMoleculas)
             prefabDict[prefab.name] = prefab;
 
-        modelo = ModelLoader.Load(modeloYoloAsset);
+        var modelo = ModelLoader.Load(modeloYoloAsset);
         var backend = SystemInfo.supportsComputeShaders ? BackendType.GPUCompute : BackendType.CPU;
         worker = new Worker(modelo, backend);
         Debug.Log($"Backend de inferência: {backend}");
@@ -91,8 +85,6 @@ public class Detector : MonoBehaviour
             Debug.LogWarning("ARRaycastManager não encontrado na cena");
 
         _ = AquecerModelo();
-
-        Debug.Log("Modelo carregado");
     }
 
     private async Task AquecerModelo()
@@ -118,7 +110,7 @@ public class Detector : MonoBehaviour
 
     void Update()
     {
-        if (moleculaAtual != null)
+        if (moleculaAtual != null && movToques != null)
         {
             movToques.MovPinca(moleculaAtual);
             movToques.MovGiro(moleculaAtual);
@@ -138,6 +130,9 @@ public class Detector : MonoBehaviour
     private bool DetectaToqueDuplo()
     {
         if (Input.touchCount > 1) return false;
+
+        if (Input.touchCount > 0 && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId))
+            return false;
 
         bool toqueIniciado = false;
 
@@ -191,16 +186,11 @@ public class Detector : MonoBehaviour
 
             List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
 
-            if (debug != null)
-                debug.MostrarMarcadores(deteccoes.Select(d => QuadradoParaTela(d.screenRect.center)).ToList());
-
             string molecula = IdentificaMolecula(deteccoes);
 
-            if (molecula != null)
-            {
+            if (molecula != null && InstanciaMolecula(deteccoes, molecula))
                 Handheld.Vibrate();
-                InstanciaMolecula(deteccoes, molecula);
-            }
+
         }
         catch (System.Exception e)
         {
@@ -234,7 +224,7 @@ public class Detector : MonoBehaviour
             inputRect = new RectInt(x0, y0, lado, lado),
             outputDimensions = new Vector2Int(saida, saida),
             outputFormat = TextureFormat.RGBA32,
-            transformation = XRCpuImage.Transformation.MirrorY
+            transformation = XRCpuImage.Transformation.MirrorX
         };
 
         if (texEntrada == null || texEntrada.width != saida)
@@ -249,7 +239,7 @@ public class Detector : MonoBehaviour
 
     private Tensor<float> TexturaPraTensor(Texture2D tex)
     {
-        Color32[] pixels = tex.GetPixels32();
+        var pixels = tex.GetRawTextureData<Color32>();
         int src = tex.width;
         int total = dimensao * dimensao;
         if (bufferTensor == null) bufferTensor = new float[3 * total];
@@ -260,8 +250,8 @@ public class Detector : MonoBehaviour
             {
                 int idxTensor = y * dimensao + x;
 
-                int oy = (dimensao - 1 - y) * src / dimensao;
-                int ox = (dimensao - 1 - x) * src / dimensao;
+                int oy = y * src / dimensao;
+                int ox = x * src / dimensao;
                 int idxPixel = oy * src + ox;
 
                 bufferTensor[idxTensor] = pixels[idxPixel].r / 255f;
@@ -281,18 +271,20 @@ public class Detector : MonoBehaviour
 
         var raw = new List<(Rect rect, int classIdx, float conf)>();
 
+        float[] dados = output.DownloadToArray();
+
         for (int a = 0; a < numAnchors; a++)
         {
-            float cx = output[0, 0, a];
-            float cy = output[0, 1, a];
-            float w = output[0, 2, a];
-            float h = output[0, 3, a];
+            float cx = dados[0 * numAnchors + a];
+            float cy = dados[1 * numAnchors + a];
+            float w = dados[2 * numAnchors + a];
+            float h = dados[3 * numAnchors + a];
 
             int melhorClasse = -1;
             float melhorConf = 0f;
             for (int c = 0; c < numClasses; c++)
             {
-                float score = output[0, 4 + c, a];
+                float score = dados[(4 + c) * numAnchors + a];
                 if (score > melhorConf)
                 {
                     melhorConf = score;
@@ -324,10 +316,18 @@ public class Detector : MonoBehaviour
                 screenRect = best.rect,
             });
 
-            sorted.RemoveAll(r => r.classIdx == best.classIdx && IoU(r.rect, best.rect) > iouMin);
+            sorted.RemoveAll(r => IoU(r.rect, best.rect) > (r.classIdx == best.classIdx ? iouMin : 0.7f));
         }
 
         return deteccoes;
+    }
+
+    private Vector2 QuadradoParaTela(Vector2 n)
+    {
+        float ladoTela = Screen.width;
+        float x = Screen.width / 2f + (n.x - 0.5f) * ladoTela;
+        float y = Screen.height / 2f + (n.y - 0.5f) * ladoTela;
+        return new Vector2(x, Screen.height - y);
     }
 
     private float IoU(Rect a, Rect b)
@@ -359,14 +359,6 @@ public class Detector : MonoBehaviour
             return nome;
 
         return null;
-    }
-
-    private Vector2 QuadradoParaTela(Vector2 n)
-    {
-        float ladoTela = Screen.width;
-        float x = Screen.width / 2f + (n.x - 0.5f) * ladoTela;
-        float y = Screen.height / 2f + (n.y - 0.5f) * ladoTela;
-        return new Vector2(x, Screen.height - y);
     }
 
     private bool InstanciaMolecula(List<AtomDetection> deteccoes, string nomeMolecula)
@@ -403,7 +395,7 @@ public class Detector : MonoBehaviour
 
         var hit = hits[0];
 
-        var plano = arPlaneManager.GetPlane(hit.trackableId);
+        var plano = hit.trackable as ARPlane;
         if (plano == null) { Debug.LogWarning("Plano não encontrado pro hit"); return false; }
 
         var novaAncora = arAnchorManager.AttachAnchor(plano, hit.pose);
