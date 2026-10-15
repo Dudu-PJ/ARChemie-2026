@@ -13,11 +13,20 @@ public GameObject painelDescricao;
 public TextMeshProUGUI textoDescricao;
 public TextMeshProUGUI formulaComposto;
 public TextMeshProUGUI nomeComposto;
+
+// Animação
+
+public Animator animator;
     
 public void MostrarDescricao(String molecula){
 
     if (string.IsNullOrEmpty(molecula))
         return;
+
+    if (animator != null)
+    {
+    animator.Play("Entrada_UI", 0, 0f);
+    }
     
     painelDescricao.SetActive(true);
 
