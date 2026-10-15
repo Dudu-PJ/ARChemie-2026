@@ -123,7 +123,7 @@ public class Detector : MonoBehaviour
         {
             if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
             processando = true;
-            RodaInferencia(cpuImage);
+            _ = RodaInferencia(cpuImage);
         }
     }
 
@@ -157,7 +157,7 @@ public class Detector : MonoBehaviour
         return duplo;
     }
 
-    private async void RodaInferencia(XRCpuImage cpuImage)
+    private async Task RodaInferencia(XRCpuImage cpuImage)
     {
         try
         {
