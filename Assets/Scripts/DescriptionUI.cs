@@ -25,7 +25,7 @@ public void MostrarDescricao(String molecula){
 
     if (animator != null)
     {
-    animator.Play("Entrada_UI", 0, 0f);
+    animator.Play("Entrada_UIDescription", 0, 0f);
     }
     
     painelDescricao.SetActive(true);
