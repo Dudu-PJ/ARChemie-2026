@@ -9,6 +9,7 @@
 /[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
+/[Bb]uild/
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
@@ -70,7 +71,6 @@ sysinfo.txt
 mono_crash.*
 
 # Builds
-*.apk
 *.aab
 *.unitypackage
 *.unitypackage.meta
@@ -103,3 +103,6 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Unity recovery files
+/[Aa]ssets/_Recovery/

@@ -1,236 +1,268 @@
-using System.Collections;
 using System.Collections.Generic;
+using Unity.Collections;
+using System.Threading.Tasks;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.InferenceEngine;
-using System.Linq;
+using UnityEngine.EventSystems;
 
 //Info de elemento
 public struct AtomDetection
 {
     public string elemento;
     public Rect screenRect;
-    public float confianca;
 }
 
 public class Detector : MonoBehaviour
 {
     // YOLO e Sentis
     public ModelAsset modeloYoloAsset;
-    private Model modelo;
     private Worker worker;
+    private bool modeloPronto = false;
 
     // AR
     public ARCameraManager arCameraManager;
     public ARAnchorManager arAnchorManager;
-    public ARPlaneManager arPlaneManager;
-    public Camera arCamera;
-    private ARRaycastManager raycastManager; // cacheado uma vez no Start, em vez de FindObjectOfType a cada instância
+    private ARRaycastManager raycastManager;
 
-    // Toque duplo (mantido caso queira voltar a exigir toque para instanciar)
-    float ultimoToqueTempo = 0;
-    float duploToqueMaxTempo = 0.3f;
+    // Toque duplo
+    private float ultimoToqueTempo = -999f;
+    private float duploToqueMaxTempo = 0.3f;
 
-    // Frame
-    private Texture2D texFrame;
-
-    // Parâmetros
-    public int dimensao = 416;
+    // Parametros
+    private int dimensao = 416;
     public float confiancaMin = 0.5f;
     public float iouMin = 0.45f;
-    public string[] nomes;
+    private string[] nomes;
+    private float[] bufferTensor;
+    private Texture2D texEntrada;
 
     // Modelo 3D
     public GameObject[] prefabsMoleculas;
     private Dictionary<string, GameObject> prefabDict;
     private GameObject moleculaAtual;
+    private ARAnchor anchorAtual;
 
-    private bool vddMolecula = false;
-    private List<AtomDetection> ultimasDeteccoes = new List<AtomDetection>();
-    private string ultimaMoleculaDetectada;
-    private string moleculaInstanciadaAtual;
-
+    // Deteccao
     public float intervaloDeteccao = 1f;
-    private float tempoDesdeUltimaDeteccao = 0f;
+    private float tempoUltimaDeteccaoConcluida = -999f;
+    private bool processando = false;
 
-    // Lista de moléculas orgâncias
-    private static readonly Dictionary<(int C, int H, int O), string> tabelaMoleculas = new Dictionary<(int, int, int), string> {
-        { (1, 4, 0), "metano" },
-        { (2, 6, 0), "etano" },
-        { (2, 4, 0), "eteno" },
-        { (1, 4, 1), "metanol" },
-        { (2, 6, 1), "etanol" },
-        { (1, 2, 2), "acidoformico" },
-        { (2, 4, 2), "acidoacetico" },
-        { (3, 6, 1), "propanona" },
-        { (1, 2, 1), "metanal" },
-        { (4, 10, 1), "eterdietilico" },
-        { (3, 6, 2), "metanoatodeetila" },
-        { (2, 4, 1), "eteno" },
-        };
+    // UI
+    public DescriptionUI descriptionUI;
+
+    // Audio
+    public AudioDescription audioDescription;
+
+    // Movimentos por toque
+    public MovToques movToques;
+
+    // Lista de moleculas organicas
+    private static readonly Dictionary<(int C, int H), string> tabelaMoleculas = new Dictionary<(int, int), string> {
+        { (1, 4), "metano" },
+        { (2, 4), "eteno" },
+        { (2, 6), "etano" }}; //Teria ligação, mas o reconhecimento de ligação está deficiente, então vou fingir que não existe por agora
 
     void Start()
     {
+        if (movToques == null) movToques = GetComponent<MovToques>();
+
         prefabDict = new Dictionary<string, GameObject>();
         foreach (var prefab in prefabsMoleculas)
             prefabDict[prefab.name] = prefab;
 
-        modelo = ModelLoader.Load(modeloYoloAsset);
-        worker = new Worker(modelo, BackendType.GPUCompute);
+        var modelo = ModelLoader.Load(modeloYoloAsset);
+        var backend = SystemInfo.supportsComputeShaders ? BackendType.GPUCompute : BackendType.CPU;
+        worker = new Worker(modelo, backend);
+        Debug.Log($"Backend de inferência: {backend}");
 
         nomes = new string[] { "carbono", "hidrogenio" };
 
-        raycastManager = FindObjectOfType<ARRaycastManager>();
+        raycastManager = FindAnyObjectByType<ARRaycastManager>();
         if (raycastManager == null)
-            Debug.LogWarning("ARRaycastManager não encontrado na cena.");
+            Debug.LogWarning("ARRaycastManager não encontrado na cena");
 
-        Debug.Log("Modelo carregado");
+        _ = AquecerModelo();
+    }
+
+    private async Task AquecerModelo()
+    {
+        try
+        {
+            using var dummy = new Tensor<float>(new TensorShape(1, 3, dimensao, dimensao));
+            worker.Schedule(dummy);
+            var saida = worker.PeekOutput() as Tensor<float>;
+            if (saida != null)
+            {
+                using var _ = await saida.ReadbackAndCloneAsync();
+            }
+
+            Debug.Log("Aquecimento do modelo concluído");
+            modeloPronto = true;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Falha no aquecimento do modelo: {e}");
+        }
     }
 
     void Update()
     {
-        tempoDesdeUltimaDeteccao += Time.deltaTime;
-        if (tempoDesdeUltimaDeteccao >= intervaloDeteccao)
+        if (moleculaAtual != null && movToques != null)
         {
-            tempoDesdeUltimaDeteccao = 0f;
-            CapturaFrame();
+            movToques.MovPinca(moleculaAtual);
+            movToques.MovGiro(moleculaAtual);
         }
 
-        // Só instancia quando a molécula detectada MUDA (ou aparece pela primeira vez),
-        // em vez de destruir/recriar o objeto a cada frame enquanto vddMolecula for true.
-        if (vddMolecula && ultimaMoleculaDetectada != moleculaInstanciadaAtual)
+        bool toqueDuplo = DetectaToqueDuplo();
+        bool nCooldown = Time.time - tempoUltimaDeteccaoConcluida >= intervaloDeteccao;
+
+        if (toqueDuplo && modeloPronto && !processando && nCooldown)
         {
-            InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
-            moleculaInstanciadaAtual = ultimaMoleculaDetectada;
+            if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
+            processando = true;
+            _ = RodaInferencia(cpuImage);
         }
-        else if (!vddMolecula)
+    }
+
+    private bool DetectaToqueDuplo()
+    {
+        if (Input.touchCount > 1) return false;
+
+        if (Input.touchCount > 0 && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId))
+            return false;
+
+        bool toqueIniciado = false;
+
+        if (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
         {
-            moleculaInstanciadaAtual = null;
+            toqueIniciado = true;
         }
 
-        /*
-        if (vddMolecula && Input.touchCount == 1)
+#if UNITY_EDITOR
+        else if (Input.GetMouseButtonDown(0))
         {
-            Touch toque = Input.GetTouch(0);
-            if (toque.phase == TouchPhase.Began)
+            toqueIniciado = true;
+        }
+#endif
+
+        if (!toqueIniciado)
+            return false;
+
+        float agora = Time.time;
+        bool duplo = (agora - ultimoToqueTempo) <= duploToqueMaxTempo;
+        ultimoToqueTempo = duplo ? -999f : agora;
+        return duplo;
+    }
+
+    private async Task RodaInferencia(XRCpuImage cpuImage)
+    {
+        try
+        {
+            Texture2D inputTex;
+            try
             {
-                if (Time.time - ultimoToqueTempo <= duploToqueMaxTempo)
-                {
-                    Debug.Log("Toque duplo detectado");
-                    ultimoToqueTempo = 0;
-                    InstanciaMolecula(ultimasDeteccoes, ultimaMoleculaDetectada);
-                    moleculaInstanciadaAtual = ultimaMoleculaDetectada;
-                }
-                else
-                {
-                    ultimoToqueTempo = Time.time;
-                }
+                inputTex = ConverteFrame(cpuImage);
             }
+            finally
+            {
+                cpuImage.Dispose();
+            }
+
+            using Tensor<float> inputTensor = TexturaPraTensor(inputTex);
+
+            worker.Schedule(inputTensor);
+
+            var outputTensor = worker.PeekOutput() as Tensor<float>;
+            if (outputTensor == null)
+            {
+                Debug.LogWarning("Saída do worker não é um Tensor<float> válido!");
+                return;
+            }
+
+            using Tensor<float> cpuOutput = await outputTensor.ReadbackAndCloneAsync();
+
+            List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
+
+            string molecula = IdentificaMolecula(deteccoes);
+
+            if (molecula != null && InstanciaMolecula(deteccoes, molecula))
+                Handheld.Vibrate();
+
         }
-        */
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Erro na inferência: {e}");
+        }
+        finally
+        {
+            processando = false;
+            tempoUltimaDeteccaoConcluida = Time.time;
+        }
     }
 
-    private void CapturaFrame()
+    private int CalculaLadoCrop(int imgW, int imgH)
     {
-        if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage)) return;
-        RodaInferencia(cpuImage);
-    }
-
-    private void RodaInferencia(XRCpuImage cpuImage)
-    {
-        Texture2D inputTex = ConverteFrame(cpuImage);
-        cpuImage.Dispose();
-
-        using Tensor<float> inputTensor = TexturaPraTensor(inputTex);
-        Destroy(inputTex);
-
-        worker.Schedule(inputTensor);
-
-        using Tensor<float> outputTensor = worker.PeekOutput() as Tensor<float>;
-        if (outputTensor == null)
-        {
-            Debug.LogWarning("Saída do worker não é um Tensor<float> válido.");
-            vddMolecula = false;
-            return;
-        }
-
-        using Tensor<float> cpuOutput = outputTensor.ReadbackAndClone();
-
-        List<AtomDetection> deteccoes = DecodeYoloOutput(cpuOutput);
-        Debug.Log($"Total de detecções: {deteccoes.Count}");
-
-        string molecula = IdentificaMolecula(deteccoes);
-        ultimasDeteccoes = deteccoes;
-        ultimaMoleculaDetectada = molecula;
-
-        if (molecula != null)
-        {
-            Handheld.Vibrate();
-            Debug.Log($"Molécula detectada: {molecula}");
-            vddMolecula = true;
-        }
-        else
-        {
-            vddMolecula = false;
-        }
+        float menor = Mathf.Min(imgW, imgH);
+        float maior = Mathf.Max(imgW, imgH);
+        float escalaTela = Mathf.Max(Screen.width / menor, Screen.height / maior);
+        return Mathf.Min((int)menor, Mathf.RoundToInt(Screen.width / escalaTela));
     }
 
     private Texture2D ConverteFrame(XRCpuImage cpuImage)
     {
-        // Converte no tamanho NATIVO da imagem
+        int lado = CalculaLadoCrop(cpuImage.width, cpuImage.height);
+        int x0 = (cpuImage.width - lado) / 2;
+        int y0 = (cpuImage.height - lado) / 2;
+
+        int saida = Mathf.Min(lado, dimensao);
+
         var conversionParams = new XRCpuImage.ConversionParams
         {
-            inputRect = new RectInt(0, 0, cpuImage.width, cpuImage.height),
-            outputDimensions = new Vector2Int(cpuImage.width, cpuImage.height),
+            inputRect = new RectInt(x0, y0, lado, lado),
+            outputDimensions = new Vector2Int(saida, saida),
             outputFormat = TextureFormat.RGBA32,
-            transformation = XRCpuImage.Transformation.MirrorY
+            transformation = XRCpuImage.Transformation.MirrorX
         };
 
-        var texNativa = new Texture2D(cpuImage.width, cpuImage.height, TextureFormat.RGBA32, false);
-        cpuImage.Convert(conversionParams, texNativa.GetRawTextureData<byte>());
-        texNativa.Apply();
+        if (texEntrada == null || texEntrada.width != saida)
+        {
+            if (texEntrada != null) Destroy(texEntrada);
+            texEntrada = new Texture2D(saida, saida, TextureFormat.RGBA32, false);
+        }
 
-        // Redimensiona pra 416x416 via GPU
-        var rt = RenderTexture.GetTemporary(dimensao, dimensao, 0, RenderTextureFormat.ARGB32);
-        Graphics.Blit(texNativa, rt);
-        Destroy(texNativa);
-
-        var texFinal = new Texture2D(dimensao, dimensao, TextureFormat.RGBA32, false);
-        var rtAtivaAnterior = RenderTexture.active;
-        RenderTexture.active = rt;
-        texFinal.ReadPixels(new Rect(0, 0, dimensao, dimensao), 0, 0);
-        texFinal.Apply();
-        RenderTexture.active = rtAtivaAnterior;
-
-        RenderTexture.ReleaseTemporary(rt);
-
-        return texFinal;
+        cpuImage.Convert(conversionParams, texEntrada.GetRawTextureData<byte>());
+        return texEntrada;
     }
 
     private Tensor<float> TexturaPraTensor(Texture2D tex)
     {
-        Color32[] pixels = tex.GetPixels32();
+        var pixels = tex.GetRawTextureData<Color32>();
+        int src = tex.width;
         int total = dimensao * dimensao;
-        var data = new float[1 * 3 * dimensao * dimensao];
+        if (bufferTensor == null) bufferTensor = new float[3 * total];
 
         for (int y = 0; y < dimensao; y++)
         {
             for (int x = 0; x < dimensao; x++)
             {
-                int idx = y * dimensao + x;
+                int idxTensor = y * dimensao + x;
 
-                data[0 * total + idx] = pixels[idx].r / 255f;
-                data[1 * total + idx] = pixels[idx].g / 255f;
-                data[2 * total + idx] = pixels[idx].b / 255f;
+                int oy = y * src / dimensao;
+                int ox = x * src / dimensao;
+                int idxPixel = oy * src + ox;
+
+                bufferTensor[idxTensor] = pixels[idxPixel].r / 255f;
+                bufferTensor[total + idxTensor] = pixels[idxPixel].g / 255f;
+                bufferTensor[2 * total + idxTensor] = pixels[idxPixel].b / 255f;
             }
         }
 
-        return new Tensor<float>(new TensorShape(1, 3, dimensao, dimensao), data);
+        return new Tensor<float>(new TensorShape(1, 3, dimensao, dimensao), bufferTensor);
     }
 
-    // Decodifica a saída do YOLO (formato [1, 4+numClasses, numAnchors]) em detecções:
-    // extrai caixa + melhor classe por âncora, filtra por confiancaMin e aplica NMS por classe.
     private List<AtomDetection> DecodeYoloOutput(Tensor<float> output)
     {
         var deteccoes = new List<AtomDetection>();
@@ -239,18 +271,20 @@ public class Detector : MonoBehaviour
 
         var raw = new List<(Rect rect, int classIdx, float conf)>();
 
+        float[] dados = output.DownloadToArray();
+
         for (int a = 0; a < numAnchors; a++)
         {
-            float cx = output[0, 0, a];
-            float cy = output[0, 1, a];
-            float w = output[0, 2, a];
-            float h = output[0, 3, a];
+            float cx = dados[0 * numAnchors + a];
+            float cy = dados[1 * numAnchors + a];
+            float w = dados[2 * numAnchors + a];
+            float h = dados[3 * numAnchors + a];
 
             int melhorClasse = -1;
             float melhorConf = 0f;
             for (int c = 0; c < numClasses; c++)
             {
-                float score = output[0, 4 + c, a];
+                float score = dados[(4 + c) * numAnchors + a];
                 if (score > melhorConf)
                 {
                     melhorConf = score;
@@ -259,9 +293,8 @@ public class Detector : MonoBehaviour
             }
 
             if (melhorClasse < 0 || melhorConf < confiancaMin) continue;
-            if (melhorClasse >= nomes.Length) continue; // classe sem nome mapeado em `nomes`
+            if (melhorClasse >= nomes.Length) continue;
 
-            // Converte de coordenadas de pixel (espaço 'dimensao') para normalizadas (0-1)
             float xMin = (cx - w / 2f) / dimensao;
             float yMin = (cy - h / 2f) / dimensao;
             float largura = w / dimensao;
@@ -270,31 +303,31 @@ public class Detector : MonoBehaviour
             raw.Add((new Rect(xMin, yMin, largura, altura), melhorClasse, melhorConf));
         }
 
-        foreach (var group in raw.GroupBy(r => r.classIdx))
+        var sorted = raw.OrderByDescending(r => r.conf).ToList();
+
+        while (sorted.Count > 0)
         {
-            var sorted = group.OrderByDescending(r => r.conf).ToList();
-            var keep = new List<(Rect rect, int classIdx, float conf)>();
+            var best = sorted[0];
+            sorted.RemoveAt(0);
 
-            while (sorted.Count > 0)
+            deteccoes.Add(new AtomDetection
             {
-                var best = sorted[0];
-                keep.Add(best);
-                sorted.RemoveAt(0);
-                sorted.RemoveAll(r => IoU(r.rect, best.rect) > iouMin);
-            }
+                elemento = nomes[best.classIdx],
+                screenRect = best.rect,
+            });
 
-            foreach (var det in keep)
-            {
-                deteccoes.Add(new AtomDetection
-                {
-                    elemento = nomes[det.classIdx],
-                    screenRect = det.rect,
-                    confianca = det.conf
-                });
-            }
+            sorted.RemoveAll(r => IoU(r.rect, best.rect) > (r.classIdx == best.classIdx ? iouMin : 0.7f));
         }
 
         return deteccoes;
+    }
+
+    private Vector2 QuadradoParaTela(Vector2 n)
+    {
+        float ladoTela = Screen.width;
+        float x = Screen.width / 2f + (n.x - 0.5f) * ladoTela;
+        float y = Screen.height / 2f + (n.y - 0.5f) * ladoTela;
+        return new Vector2(x, Screen.height - y);
     }
 
     private float IoU(Rect a, Rect b)
@@ -312,69 +345,86 @@ public class Detector : MonoBehaviour
 
     private string IdentificaMolecula(List<AtomDetection> deteccoes)
     {
-        int C = 0, H = 0, O = 0;
+        int C = 0, H = 0;
         foreach (var det in deteccoes)
         {
             if (det.elemento == "carbono") C++;
             else if (det.elemento == "hidrogenio") H++;
-            else if (det.elemento == "oxigenio") O++;
         }
 
-        Debug.Log($"Átomos detectados: C={C} H={H} O={O}");
+        Debug.Log($"Elementos detectados: C={C} H={H}");
 
-        var chave = (C, H, O);
+        var chave = (C, H);
         if (tabelaMoleculas.TryGetValue(chave, out string nome))
             return nome;
 
         return null;
     }
 
-    private void InstanciaMolecula(List<AtomDetection> deteccoes, string nomeMolecula)
+    private bool InstanciaMolecula(List<AtomDetection> deteccoes, string nomeMolecula)
     {
         if (deteccoes == null || deteccoes.Count == 0)
         {
-            Debug.LogWarning("Nenhuma detecção disponível para posicionar a molécula.");
-            return;
+            Debug.LogWarning("Nenhuma detecção disponível para posicionar a molécula");
+            return false;
         }
 
         if (!prefabDict.TryGetValue(nomeMolecula, out GameObject prefab))
         {
             Debug.LogWarning($"Prefab não encontrado: {nomeMolecula}");
-            return;
+            return false;
         }
 
         if (raycastManager == null)
         {
             Debug.LogWarning("ARRaycastManager não encontrado");
-            return;
+            return false;
         }
 
-        // Centro médio dos bounding boxes
         Vector2 centroTela = Vector2.zero;
         foreach (var det in deteccoes)
-            centroTela += new Vector2(
-                det.screenRect.center.x * Screen.width,
-                det.screenRect.center.y * Screen.height
-            );
+            centroTela += QuadradoParaTela(det.screenRect.center);
         centroTela /= deteccoes.Count;
 
         var hits = new List<ARRaycastHit>();
         if (!raycastManager.Raycast(centroTela, hits, TrackableType.PlaneWithinPolygon))
         {
             Debug.Log("Raycast não acertou nenhum plano");
-            return;
+            return false;
         }
 
-        if (moleculaAtual != null)
-            Destroy(moleculaAtual);
-
         var hit = hits[0];
-        moleculaAtual = Instantiate(prefab, hit.pose.position, hit.pose.rotation);
+
+        var plano = hit.trackable as ARPlane;
+        if (plano == null) { Debug.LogWarning("Plano não encontrado pro hit"); return false; }
+
+        var novaAncora = arAnchorManager.AttachAnchor(plano, hit.pose);
+        if (novaAncora == null) { Debug.LogWarning("Falha ao criar âncora"); return false; }
+
+        if (anchorAtual != null) Destroy(anchorAtual.gameObject);
+        anchorAtual = novaAncora;
+
+        moleculaAtual = Instantiate(prefab, anchorAtual.transform);
+        moleculaAtual.transform.localPosition = Vector3.zero;
+        moleculaAtual.transform.localRotation = Quaternion.identity;
+
+        if (audioDescription != null)
+            audioDescription.ReproduzirDescricao(nomeMolecula);
+
         Debug.Log($"Molécula instanciada: {nomeMolecula}");
+
+        if (descriptionUI != null && !string.IsNullOrEmpty(nomeMolecula))
+        {
+            descriptionUI.MostrarDescricao(nomeMolecula);
+        }
+
+        return true;
     }
 
     void OnDestroy()
     {
+        if (texEntrada != null) Destroy(texEntrada);
         worker?.Dispose();
+        if (anchorAtual != null) Destroy(anchorAtual.gameObject);
     }
 }
