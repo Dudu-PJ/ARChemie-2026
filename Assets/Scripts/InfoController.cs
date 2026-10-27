@@ -6,6 +6,7 @@ public class InfoController : MonoBehaviour
     public GameObject painelInfo;
     public GameObject painelDescricao;
     public Animator animatorDescricao;
+    public Animator animatorInfo;
 
     private bool transicaoEmAndamento;
     private bool descricaoEstavaAtiva;
@@ -45,25 +46,28 @@ public class InfoController : MonoBehaviour
 
     }
 
-       private IEnumerator FecharPainelCoroutine()
+private IEnumerator FecharPainelCoroutine()
+{
+    transicaoEmAndamento = true;
+
+    animatorInfo.Play("SaidaAnimacao_Info", 0, 0f);
+
+    // Espera a saída avançar até perto do final
+    yield return new WaitForSeconds(0.50f);
+
+    if (descricaoEstavaAtiva)
     {
-        transicaoEmAndamento = true;
+        painelDescricao.SetActive(true);
 
-        painelInfo.SetActive(false);
-
-        if (descricaoEstavaAtiva)
-        {
-            painelDescricao.SetActive(true);
-
-            animatorDescricao.Play(
-                "Entrada_UIDescription", 0, 0f);
-
-            yield return null;
-
-            yield return new WaitForSeconds(0.65f);
-        }
-
-        transicaoEmAndamento = false;
+        animatorDescricao.Play(
+            "Entrada_UIDescription", 0, 0f);
     }
 
+    // Deixa as duas animações terminarem juntas
+    yield return new WaitForSeconds(0.15f);
+
+    painelInfo.SetActive(false);
+
+    transicaoEmAndamento = false;
+}
 }
