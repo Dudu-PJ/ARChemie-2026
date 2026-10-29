@@ -1,17 +1,15 @@
 using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 
 public class ControladorMenu : MonoBehaviour
 {
-    Canvas menuInicial;
-    Canvas menuAssess;
+    [SerializeField] GameObject menuInicial;
+    [SerializeField] GameObject menuAssess;
+    [SerializeField] float distanciaMinimaSwipe = 0.15f;
 
-    void Start()
-    {
-        menuInicial = GameObject.Find("MenuInicial").GetComponent<Canvas>();
-        menuAssess = GameObject.Find("MenuAssess").GetComponent<Canvas>();
-    }
+    Vector2 posicaoInicial;
+    bool arrastando;
+    float tempoUltimoSwipe = -1f;
 
     public void BotaoGithub()
     {
@@ -20,24 +18,60 @@ public class ControladorMenu : MonoBehaviour
 
     public void TrocaCena()
     {
+        if (Time.time - tempoUltimoSwipe < 0.3f) return;
         SceneManager.LoadScene("ARChemie2026");
     }
 
-    void OnUpdate()
+    void Update()
     {
         if (Input.touchCount > 0)
         {
             Touch toque = Input.GetTouch(0);
-            if (toque.deltaPosition.x > 0 && menuInicial.enabled == true)
+
+            if (toque.phase == TouchPhase.Began)
             {
-                menuInicial.enabled = false;
-                menuAssess.enabled = true;
+                posicaoInicial = toque.position;
+                arrastando = true;
             }
-            else if (toque.deltaPosition.x < 0 && menuAssess.enabled == true)
+            else if (toque.phase == TouchPhase.Ended && arrastando)
             {
-                menuInicial.enabled = true;
-                menuAssess.enabled = false;
+                arrastando = false;
+                ProcessaSwipe(toque.position.x - posicaoInicial.x);
             }
+            else if (toque.phase == TouchPhase.Canceled)
+            {
+                arrastando = false;
+            }
+        }
+#if UNITY_EDITOR
+        else if (Input.GetMouseButtonDown(0))
+        {
+            posicaoInicial = Input.mousePosition;
+            arrastando = true;
+        }
+        else if (Input.GetMouseButtonUp(0) && arrastando)
+        {
+            arrastando = false;
+            ProcessaSwipe(Input.mousePosition.x - posicaoInicial.x);
+        }
+#endif
+    }
+
+    void ProcessaSwipe(float deslocamentoX)
+    {
+        float minimo = Screen.width * distanciaMinimaSwipe;
+
+        if (deslocamentoX < minimo && menuInicial.activeSelf)
+        {
+            menuInicial.SetActive(false);
+            menuAssess.SetActive(true);
+            tempoUltimoSwipe = Time.time;
+        }
+        else if (deslocamentoX > -minimo && menuAssess.activeSelf)
+        {
+            menuAssess.SetActive(false);
+            menuInicial.SetActive(true);
+            tempoUltimoSwipe = Time.time;
         }
     }
 }
