@@ -1,3 +1,4 @@
+
 using UnityEngine;
 using System.Collections;
 
@@ -5,69 +6,104 @@ public class InfoController : MonoBehaviour
 {
     public GameObject painelInfo;
     public GameObject painelDescricao;
+    public GameObject painelInicial;
+
     public Animator animatorDescricao;
     public Animator animatorInfo;
+    public Animator animatorPainelInicial;
 
     private bool transicaoEmAndamento;
     private bool descricaoEstavaAtiva;
+    private bool painelInicialEstavaAtivo;
 
-    public void abrirPainel(){
+    public void abrirPainel()
+    {
         if (transicaoEmAndamento || painelInfo.activeSelf)
-        return;
+            return;
 
         StartCoroutine(AbrirPainelCoroutine());
     }
 
-    public void fecharPainel(){
+    public void fecharPainel()
+    {
         if (transicaoEmAndamento || !painelInfo.activeSelf)
-        return;
+            return;
 
         StartCoroutine(FecharPainelCoroutine());
     }
 
-    private IEnumerator AbrirPainelCoroutine(){
-        transicaoEmAndamento = true; 
+    private IEnumerator AbrirPainelCoroutine()
+    {
+        transicaoEmAndamento = true;
 
+        painelInicialEstavaAtivo = painelInicial.activeSelf;
         descricaoEstavaAtiva = painelDescricao.activeSelf;
 
-        if(descricaoEstavaAtiva){
-                animatorDescricao.Play("Saida_UIDescription", 0, 0f);
+        if (painelInicialEstavaAtivo)
+        {
+            animatorPainelInicial.Play(
+                "SaidaMoldura", 0, 0f
+            );
+
+            yield return null;
+
+            float duracao = animatorPainelInicial
+                .GetCurrentAnimatorStateInfo(0).length;
+
+            yield return new WaitForSeconds(duracao);
+
+            painelInicial.SetActive(false);
+        }
+
+        if (descricaoEstavaAtiva)
+        {
+            animatorDescricao.Play("Saida_UIDescription", 0, 0f);
+
+            yield return null;
+
+            yield return new WaitForSeconds(0.65f);
+
+            painelDescricao.SetActive(false);
+        }
+
+        painelInfo.SetActive(true);
+
+        transicaoEmAndamento = false;
+    }
+
+    private IEnumerator FecharPainelCoroutine()
+    {
+        transicaoEmAndamento = true;
+
+        animatorInfo.Play("SaidaAnimacao_Info", 0, 0f);
 
         yield return null;
 
-        yield return new WaitForSeconds(0.65f);
+        float duracaoInfo = animatorInfo
+            .GetCurrentAnimatorStateInfo(0).length;
 
-        painelDescricao.SetActive(false);
-        
+        yield return new WaitForSeconds(duracaoInfo);
+
+        painelInfo.SetActive(false);
+
+        if (painelInicialEstavaAtivo)
+        {
+            painelInicial.SetActive(true);
+
+            animatorPainelInicial.Play(
+                "EntradaMoldura", 0, 0f
+            );
         }
 
-            painelInfo.SetActive(true);
-     transicaoEmAndamento = false;
+        if (descricaoEstavaAtiva)
+        {
+            painelDescricao.SetActive(true);
 
+            animatorDescricao.Play(
+                "Entrada_UIDescription", 0, 0f
+            );
+        }
+
+        transicaoEmAndamento = false;
     }
-
-private IEnumerator FecharPainelCoroutine()
-{
-    transicaoEmAndamento = true;
-
-    animatorInfo.Play("SaidaAnimacao_Info", 0, 0f);
-
-    // Espera a saída avançar até perto do final
-    yield return new WaitForSeconds(0.50f);
-
-    if (descricaoEstavaAtiva)
-    {
-        painelDescricao.SetActive(true);
-
-        animatorDescricao.Play(
-            "Entrada_UIDescription", 0, 0f);
-    }
-
-    // Deixa as duas animações terminarem juntas
-    yield return new WaitForSeconds(0.15f);
-
-    painelInfo.SetActive(false);
-
-    transicaoEmAndamento = false;
-}
 }

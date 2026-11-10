@@ -52,6 +52,10 @@ public class Detector : MonoBehaviour
 
     // UI
     public DescriptionUI descriptionUI;
+    public FrameController frameController;
+
+    // Controle de erro
+    public ErrorMessage errorMessage;
 
     // Audio
     public AudioDescription audioDescription;
@@ -188,8 +192,15 @@ public class Detector : MonoBehaviour
 
             string molecula = IdentificaMolecula(deteccoes);
 
-            if (molecula != null && InstanciaMolecula(deteccoes, molecula))
-                Handheld.Vibrate();
+            if (molecula == null)
+            {
+            errorMessage?.Mostrar();}
+
+            else if (InstanciaMolecula(deteccoes, molecula))
+{
+    Handheld.Vibrate();
+    frameController?.ReproduzirSaida();
+}
 
         }
         catch (System.Exception e)
