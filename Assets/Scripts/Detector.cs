@@ -7,6 +7,7 @@ using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.InferenceEngine;
 using UnityEngine.EventSystems;
+using System.Collections;
 
 //Info de elemento
 public struct AtomDetection
@@ -21,6 +22,7 @@ public class Detector : MonoBehaviour
     public ModelAsset modeloYoloAsset;
     private Worker worker;
     private bool modeloPronto = false;
+    public bool ModeloPronto => modeloPronto;
 
     // AR
     public ARCameraManager arCameraManager;
@@ -69,7 +71,7 @@ public class Detector : MonoBehaviour
         { (2, 4), "eteno" },
         { (2, 6), "etano" }}; //Teria ligação, mas o reconhecimento de ligação está deficiente, então vou fingir que não existe por agora
 
-    void Start()
+    IEnumerator Start()
     {
         if (movToques == null) movToques = GetComponent<MovToques>();
 
@@ -77,16 +79,22 @@ public class Detector : MonoBehaviour
         foreach (var prefab in prefabsMoleculas)
             prefabDict[prefab.name] = prefab;
 
-        var modelo = ModelLoader.Load(modeloYoloAsset);
-        var backend = SystemInfo.supportsComputeShaders ? BackendType.GPUCompute : BackendType.CPU;
-        worker = new Worker(modelo, backend);
-        Debug.Log($"Backend de inferência: {backend}");
-
         nomes = new string[] { "carbono", "hidrogenio" };
 
         raycastManager = FindAnyObjectByType<ARRaycastManager>();
         if (raycastManager == null)
             Debug.LogWarning("ARRaycastManager não encontrado na cena");
+
+        yield return null;
+        yield return null;
+
+        var modelo = ModelLoader.Load(modeloYoloAsset);
+        yield return null;
+
+        var backend = SystemInfo.supportsComputeShaders ? BackendType.GPUCompute : BackendType.CPU;
+        worker = new Worker(modelo, backend);
+        Debug.Log($"Backend de inferência: {backend}");
+        yield return null;
 
         _ = AquecerModelo();
     }
@@ -194,13 +202,14 @@ public class Detector : MonoBehaviour
 
             if (molecula == null)
             {
-            errorMessage?.Mostrar();}
+                errorMessage?.Mostrar();
+            }
 
             else if (InstanciaMolecula(deteccoes, molecula))
-{
-    Handheld.Vibrate();
-    frameController?.ReproduzirSaida();
-}
+            {
+                Handheld.Vibrate();
+                frameController?.ReproduzirSaida();
+            }
 
         }
         catch (System.Exception e)
