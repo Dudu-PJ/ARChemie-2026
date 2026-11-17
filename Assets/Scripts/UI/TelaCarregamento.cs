@@ -6,7 +6,7 @@ public class TelaCarregamento : MonoBehaviour
 {
     public Detector detector;
     public float tempoMinimo = 1f;
-    public float duracaoFade = 0.4f;
+    public float duracaoFade = 0.5f;
 
     private CanvasGroup grupo;
 

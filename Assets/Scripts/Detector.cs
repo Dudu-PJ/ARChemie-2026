@@ -56,6 +56,9 @@ public class Detector : MonoBehaviour
     public DescriptionUI descriptionUI;
     public FrameController frameController;
 
+    // Molécula de emergência
+    public Emergencia emergencia;
+
     // Controle de erro
     public ErrorMessage errorMessage;
 
@@ -129,6 +132,9 @@ public class Detector : MonoBehaviour
         }
 
         bool toqueDuplo = DetectaToqueDuplo();
+        if (toqueDuplo && emergencia != null)
+            Moleculas.Remover();
+
         bool nCooldown = Time.time - tempoUltimaDeteccaoConcluida >= intervaloDeteccao;
 
         if (toqueDuplo && modeloPronto && !processando && nCooldown)
@@ -421,12 +427,17 @@ public class Detector : MonoBehaviour
         var novaAncora = arAnchorManager.AttachAnchor(plano, hit.pose);
         if (novaAncora == null) { Debug.LogWarning("Falha ao criar âncora"); return false; }
 
-        if (anchorAtual != null) Destroy(anchorAtual.gameObject);
-        anchorAtual = novaAncora;
+        RemoverMolecula();
+        if (emergencia != null) emergencia.RemoverMolecula();
 
-        moleculaAtual = Instantiate(prefab, anchorAtual.transform);
-        moleculaAtual.transform.localPosition = Vector3.zero;
-        moleculaAtual.transform.localRotation = Quaternion.identity;
+        GameObject modelo = Instantiate(prefab, novaAncora.transform);
+        modelo.transform.localPosition = Vector3.zero;
+        modelo.transform.localRotation = Quaternion.identity;
+
+        Moleculas.Registrar(novaAncora.gameObject, modelo);
+
+        anchorAtual = novaAncora;
+        moleculaAtual = modelo;
 
         if (audioDescription != null)
             audioDescription.ReproduzirDescricao(nomeMolecula);
@@ -439,6 +450,13 @@ public class Detector : MonoBehaviour
         }
 
         return true;
+    }
+
+    public void RemoverMolecula()
+    {
+        if (anchorAtual != null) Destroy(anchorAtual.gameObject);
+        anchorAtual = null;
+        moleculaAtual = null;
     }
 
     void OnDestroy()
