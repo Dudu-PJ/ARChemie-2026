@@ -18,55 +18,71 @@ public struct AtomDetection
 
 public class Detector : MonoBehaviour
 {
-    // YOLO e Sentis
-    public ModelAsset modeloYoloAsset;
-    private Worker worker;
-    private bool modeloPronto = false;
-    public bool ModeloPronto => modeloPronto;
-
-    // AR
+    [Header("Referências")]
+    //AR
     public ARCameraManager arCameraManager;
     public ARAnchorManager arAnchorManager;
     private ARRaycastManager raycastManager;
+
+    [Space(10)]
+
+    //Emergencia.cs
+    public Emergencia emergencia;
+
+    [Space(10)]
+
+    //YOLO
+    public ModelAsset modeloYoloAsset;
+
+    [Space(10)]
+
+    // UI
+    public DescriptionUI descriptionUI;
+    public FrameController frameController;
+    public ErrorMessage errorMessage;
+
+    [Space(10)]
+
+    //Audiodescrição
+    public AudioDescription audioDescription;
+
+    [Space(10)]
+
+    //MovToques.cs
+    public MovToques movToques;
+
+    // YOLO e Sentis
+    private Worker worker;
+    private bool modeloPronto = false;
+    public bool ModeloPronto => modeloPronto;
 
     // Toque duplo
     private float ultimoToqueTempo = -999f;
     private float duploToqueMaxTempo = 0.3f;
 
-    // Parametros
-    private int dimensao = 416;
+    [Header("Configurações de detecção")]
     public float confiancaMin = 0.5f;
     public float iouMin = 0.45f;
+    private int dimensao = 416;
     private string[] nomes;
     private float[] bufferTensor;
     private Texture2D texEntrada;
 
     // Modelo 3D
+    [Header("Modelo 3D")]
     public GameObject[] prefabsMoleculas;
     private Dictionary<string, GameObject> prefabDict;
     private GameObject moleculaAtual;
     private ARAnchor anchorAtual;
+    public float alturaMolecula = 0.2f;
 
     // Deteccao
+    [Header("Detecção")]
     public float intervaloDeteccao = 1f;
     private float tempoUltimaDeteccaoConcluida = -999f;
     private bool processando = false;
 
-    // UI
-    public DescriptionUI descriptionUI;
-    public FrameController frameController;
 
-    // Molécula de emergência
-    public Emergencia emergencia;
-
-    // Controle de erro
-    public ErrorMessage errorMessage;
-
-    // Audio
-    public AudioDescription audioDescription;
-
-    // Movimentos por toque
-    public MovToques movToques;
 
     // Lista de moleculas organicas
     private static readonly Dictionary<(int C, int H), string> tabelaMoleculas = new Dictionary<(int, int), string> {
@@ -431,7 +447,7 @@ public class Detector : MonoBehaviour
         if (emergencia != null) emergencia.RemoverMolecula();
 
         GameObject modelo = Instantiate(prefab, novaAncora.transform);
-        modelo.transform.localPosition = Vector3.zero;
+        modelo.transform.localPosition = new Vector3(0, alturaMolecula, 0);
         modelo.transform.localRotation = Quaternion.identity;
 
         Moleculas.Registrar(novaAncora.gameObject, modelo);

@@ -18,12 +18,16 @@ public class Emergencia : MonoBehaviour
     public ARRaycastManager raycastManager;
     public ARAnchorManager anchorManager;
 
-    [Header("Fluxo padrão")]
-    public Detector detector;
+    private float alturaMolecula;
 
     private static readonly List<ARRaycastHit> hits = new List<ARRaycastHit>();
     private ARAnchor ancoraAtual;
     private bool colocando;
+
+    private void Start()
+    {
+        alturaMolecula = FindAnyObjectByType<Detector>().alturaMolecula;
+    }
 
     public void BotaoEmergencia()
     {
@@ -47,7 +51,7 @@ public class Emergencia : MonoBehaviour
     }
 
     private async void Instanciar(GameObject prefab)
-    {
+    {   
         if (colocando) return;
 
         Vector2 centroTela = new Vector2(Screen.width / 2f, Screen.height / 2f);
@@ -74,6 +78,7 @@ public class Emergencia : MonoBehaviour
             ARAnchor novaAncora = resultado.value;
 
             GameObject modelo = Instantiate(prefab, novaAncora.transform);
+            modelo.transform.localPosition = new Vector3(0, alturaMolecula, 0);
             Moleculas.Registrar(novaAncora.gameObject, modelo);
 
             emergenciaButton.SetActive(true);

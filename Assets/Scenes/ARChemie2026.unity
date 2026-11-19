@@ -970,8 +970,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 320, y: 0}
-  m_SizeDelta: {x: 400, y: 100}
+  m_AnchoredPosition: {x: 415, y: 0}
+  m_SizeDelta: {x: 150, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &283439046
 GameObject:
@@ -1860,7 +1860,6 @@ MonoBehaviour:
   modelo3: {fileID: 919132149155446097, guid: d6569475703dee045a4737f8fbea8be9, type: 3}
   raycastManager: {fileID: 1545190811}
   anchorManager: {fileID: 1545190810}
-  detector: {fileID: 0}
 --- !u!1 &479738540
 GameObject:
   m_ObjectHideFlags: 0
@@ -2534,11 +2533,11 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1370061027}
-  - {fileID: 1978392091}
   - {fileID: 2075842481}
   - {fileID: 1655265267}
   - {fileID: 1740870052}
   - {fileID: 1685745121}
+  - {fileID: 1978392091}
   - {fileID: 2080556515}
   - {fileID: 1840771919}
   m_Father: {fileID: 0}
@@ -4595,7 +4594,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Valvula de escape
+  m_text: DEV
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -5836,22 +5835,23 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4123894081a34e4c83f89fc63421f51, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Detector
-  modeloYoloAsset: {fileID: 5022602860645237092, guid: 31bd37fde89eece429fde26d4715c2fb, type: 3}
   arCameraManager: {fileID: 2144419704}
   arAnchorManager: {fileID: 1545190810}
-  confiancaMin: 0.5
+  emergencia: {fileID: 449186077}
+  modeloYoloAsset: {fileID: 5022602860645237092, guid: 31bd37fde89eece429fde26d4715c2fb, type: 3}
+  descriptionUI: {fileID: 1370061028}
+  frameController: {fileID: 640881337}
+  errorMessage: {fileID: 1978392092}
+  audioDescription: {fileID: 1231254429}
+  movToques: {fileID: 1545190816}
+  confiancaMin: 0.7
   iouMin: 0.45
   prefabsMoleculas:
   - {fileID: 919132149155446097, guid: d8dd8297c752d334987f3ac524650965, type: 3}
   - {fileID: 919132149155446097, guid: d6569475703dee045a4737f8fbea8be9, type: 3}
   - {fileID: 919132149155446097, guid: 31cd70280264d4542bc1d9be6028fb46, type: 3}
+  alturaMolecula: 0.2
   intervaloDeteccao: 1
-  descriptionUI: {fileID: 1370061028}
-  frameController: {fileID: 640881337}
-  emergencia: {fileID: 0}
-  errorMessage: {fileID: 1978392092}
-  audioDescription: {fileID: 1231254429}
-  movToques: {fileID: 1545190816}
 --- !u!114 &1545190816
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7757,7 +7757,7 @@ GameObject:
   - component: {fileID: 2080556517}
   - component: {fileID: 2080556516}
   m_Layer: 5
-  m_Name: Valvula de Escape
+  m_Name: Emergencia
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -7784,7 +7784,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -950}
+  m_AnchoredPosition: {x: 41.9, y: -987.18}
   m_SizeDelta: {x: 1040, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2080556516
